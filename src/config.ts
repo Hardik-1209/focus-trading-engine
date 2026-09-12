@@ -1,0 +1,61 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
+function required(key: string): string {
+  const val = process.env[key];
+  if (!val) throw new Error(`Missing required env var: ${key}`);
+  return val;
+}
+
+function optional(key: string, fallback: string): string {
+  return process.env[key] || fallback;
+}
+
+export const CONFIG = {
+  PORT:                      parseInt(optional('PORT', '3000')),
+  SUPABASE_URL:              required('SUPABASE_URL'),
+  SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY'),
+  BITGET_API_KEY:            required('BITGET_API_KEY'),
+  BITGET_SECRET_KEY:         required('BITGET_SECRET_KEY'),
+  BITGET_PASSPHRASE:         required('BITGET_PASSPHRASE'),
+  GROQ_MODEL:                optional('GROQ_MODEL', 'openai/gpt-oss-20b'),
+  GROQ_KEYS: [
+    process.env.GROQ_API_KEY,  process.env.GROQ_API_KEY2,
+    process.env.GROQ_API_KEY3, process.env.GROQ_API_KEY4,
+    process.env.GROQ_API_KEY5, process.env.GROQ_API_KEY6,
+    process.env.GROQ_API_KEY7,
+  ].filter(Boolean) as string[],
+  WATCH_DURATION_MS:   parseInt(optional('WATCH_DURATION_MINUTES', '30')) * 60 * 1000,
+  DRY_RUN:             optional('DRY_RUN', 'true') !== 'false',
+  MIN_VOLUME_USDT:     parseFloat(optional('MIN_VOLUME_USDT', '500000')),
+  CLOUD_API_URL:       optional('CLOUD_API_URL', 'http://localhost:3001'),
+  CLOUD_API_KEY:       optional('CLOUD_API_KEY', ''),
+} as const;
+
+export const RISK = {
+  LEVERAGE: 5,
+  RISK_FACTOR: 0.10,
+  TAKE_PROFIT_PCT: 0.06,       // 6% base target
+  TRAILING_STOP_PCT: 0.025,    // 2.5% trailing stop (tighter & more protective than old 5%)
+  MAX_LOSS_PCT: 0.04,          // 4% hard stop
+  STOP_LOSS_ACTUAL_PCT: 0.03,  // 3% initial stop
+  FEE_RATE: 0.0006,            // Bitget taker fee
+  MIN_HOLD_MINUTES: 5,
+  MAX_HOLD_HOURS: 6,
+  STALE_HOLD_HOURS: 1.5,
+  STALE_PROFIT_THRESHOLD: 0.015,
+  USE_ATR_STOP: true,
+  ATR_MULTIPLIER: 2.0,
+} as const;
+
+export const SIGNAL = {
+  RSI_PULLBACK_LONG: 42,
+  RSI_PULLBACK_SHORT: 58,
+  RSI_TREND_LONG: 52,
+  RSI_TREND_SHORT: 48,
+  ADX_STRONG: 25,
+  ADX_WEAK: 20,
+  VOLUME_ZSCORE_MIN: 1.2,
+  SIGNAL_COOLDOWN_MS: 5 * 60 * 1000, // 5 min cooldown per coin
+  USE_5M_FILTER: true,
+} as const;

@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────
+   ANTIGRAVITY SYSTEMS — Mobile-First CSS
+   ───────────────────────────────────────────── */
+
+/* Force CSS cache-busting build hash update */
+.antigravity-cache-bust {
+  transition: all 0.3s ease;
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS font size adjustment fix */
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+/* iOS Safe Area bottom padding for bottom nav */
+.pb-safe {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+
+/* Fade-in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Custom thin scrollbar (desktop) */
+.custom-scrollbar::-webkit-scrollbar        { width: 3px; }
+.custom-scrollbar::-webkit-scrollbar-track  { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb  { background: rgba(148,163,184,0.18); border-radius: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.4); }
+
+/* ─── Bottom Nav Active Indicator ─── */
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 2px;
+  padding: 8px 0;
+  cursor: pointer;
+  transition: color 0.2s;
+  color: rgb(100 116 139);   /* slate-500 */
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+  position: relative;
+}
+.bottom-nav-item.active {
+  color: rgb(34 211 238);    /* cyan-400 */
+}
+.bottom-nav-item.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: linear-gradient(90deg, rgb(34 211 238), rgb(99 102 241));
+  border-radius: 0 0 4px 4px;
+}
+
+/* Prevent horizontal scroll globally on mobile */
+body {
+  overflow-x: hidden;
+}
+
+/* Touch-friendly min tap target */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Compact mobile table override */
+@media (max-width: 640px) {
+  .mobile-card-table td {
+    display: block;
+    width: 100%;
+  }
+}

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: focus-trading-engine
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DRY_RUN
+        value: "true"
+      - key: WATCH_DURATION_MINUTES
+        value: "30"
+      - key: MIN_VOLUME_USDT
+        value: "500000"
+      - key: GROQ_MODEL
+        value: "openai/gpt-oss-20b"
