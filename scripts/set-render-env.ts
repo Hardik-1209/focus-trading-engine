@@ -11,7 +11,7 @@ async function setRenderEnvAndDeploy() {
 
   const envVars = [
     { key: 'PORT', value: '10000' },
-    { key: 'NODE_ENV', value: 'production' },
+    { key: 'NPM_CONFIG_PRODUCTION', value: 'false' },
     { key: 'SUPABASE_URL', value: process.env.SUPABASE_URL || '' },
     { key: 'SUPABASE_SERVICE_ROLE_KEY', value: process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
     { key: 'BITGET_API_KEY', value: process.env.BITGET_API_KEY || '' },
@@ -49,8 +49,32 @@ async function setRenderEnvAndDeploy() {
     return;
   }
 
+  // Update buildCommand to ensure devDependencies are installed
+  console.log(`[Render] Updating service buildCommand...`);
+  const patchRes = await fetch(`https://api.render.com/v1/services/${serviceId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      serviceDetails: {
+        envSpecificDetails: {
+          buildCommand: 'npm install --include=dev && npm run build',
+          startCommand: 'npm start',
+        },
+      },
+    }),
+  });
+  if (patchRes.ok) {
+    console.log('✅ [Render] Service buildCommand updated!');
+  } else {
+    console.warn('⚠️ [Render] Could not patch buildCommand:', await patchRes.json());
+  }
+
   // Trigger a fresh deployment
-  console.log('[Render] Triggering fresh deployment...');
+  console.log('[Render] Triggering fresh deployment with clearCache=clear...');
   const depRes = await fetch(`https://api.render.com/v1/services/${serviceId}/deploys`, {
     method: 'POST',
     headers: {
