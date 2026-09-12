@@ -35,7 +35,7 @@ export declare const SIGNAL: {
     readonly RSI_TREND_SHORT: 48;
     readonly ADX_STRONG: 25;
     readonly ADX_WEAK: 20;
-    readonly VOLUME_ZSCORE_MIN: 1.2;
+    readonly VOLUME_ZSCORE_MIN: 1;
     readonly SIGNAL_COOLDOWN_MS: number;
     readonly USE_5M_FILTER: true;
 };

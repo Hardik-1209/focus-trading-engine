@@ -69,6 +69,23 @@ async function watchCoin(symbol, cycleNumber) {
             return;
         // Detect signal with 5m multi-timeframe confirmation
         const signal = (0, signal_detector_1.detectSignal)(allCandles, latestCandle.close, ws.candles5m);
+        // Broadcast live telemetry indicators to engine_status for dashboard
+        (0, supabase_logger_1.updateEngineStatus)({
+            focused_symbol: symbol,
+            cycle_count: cycleNumber,
+            active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
+            live_indicators: {
+                price: latestCandle.close,
+                rsi: parseFloat(signal.indicators.rsi.toFixed(1)),
+                adx: parseFloat(signal.indicators.adx.toFixed(1)),
+                chop: parseFloat(signal.indicators.chop.toFixed(1)),
+                vwap: parseFloat(signal.indicators.vwap.toFixed(4)),
+                mtf: signal.indicators.mtfTrend,
+                atr: parseFloat(signal.indicators.atr.toFixed(4)),
+                volZ: parseFloat(signal.indicators.volumeZ.toFixed(2)),
+                timestamp: new Date().toISOString(),
+            },
+        }).catch(() => { });
         if (signal.action === 'WAIT') {
             if (latestCandle.timestamp !== lastLoggedMinute) {
                 console.log(`[Engine] ⏳ ${signal.reason}`);

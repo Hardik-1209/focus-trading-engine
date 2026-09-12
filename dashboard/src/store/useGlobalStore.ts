@@ -56,6 +56,17 @@ export interface EngineStatus {
   total_pnl?: number;
   active_groq_key_index?: number;
   mode?: string;
+  live_indicators?: {
+    price?: number;
+    rsi?: number;
+    adx?: number;
+    chop?: number;
+    vwap?: number;
+    mtf?: string;
+    atr?: number;
+    volZ?: number;
+    timestamp?: string;
+  };
   updated_at?: string;
 }
 
@@ -66,7 +77,7 @@ export interface Telemetry {
   websocketConnected: boolean;
 }
 
-export type DashboardPage = 'overview' | 'brain' | 'ledger' | 'health';
+export type DashboardPage = 'overview' | 'scanner' | 'trades' | 'brain' | 'ledger' | 'health';
 
 interface GlobalStoreState {
   focusLogs: FocusLog[];
@@ -77,6 +88,7 @@ interface GlobalStoreState {
   safeModeActive: boolean;
   activePage: DashboardPage;
   walletBalance: number;
+  inrRate: number;
   livePrices: Record<string, number>;
   setFocusLogs: (logs: FocusLog[]) => void;
   addFocusLog: (log: FocusLog) => void;
@@ -90,6 +102,7 @@ interface GlobalStoreState {
   setSafeModeActive: (active: boolean) => void;
   setActivePage: (page: DashboardPage) => void;
   setWalletBalance: (balance: number) => void;
+  setInrRate: (rate: number) => void;
   setLivePrice: (symbol: string, price: number) => void;
 }
 
@@ -106,7 +119,8 @@ export const useGlobalStore = create<GlobalStoreState>((set) => ({
   },
   safeModeActive: true,
   activePage: 'overview',
-  walletBalance: 11.82,
+  walletBalance: 10.00,
+  inrRate: 88.50,
   livePrices: {},
   setFocusLogs: (focusLogs) => set({ focusLogs }),
   addFocusLog: (log) =>
@@ -137,6 +151,7 @@ export const useGlobalStore = create<GlobalStoreState>((set) => ({
   setSafeModeActive: (safeModeActive) => set({ safeModeActive }),
   setActivePage: (activePage) => set({ activePage }),
   setWalletBalance: (walletBalance) => set({ walletBalance }),
+  setInrRate: (inrRate) => set({ inrRate }),
   setLivePrice: (symbol, price) =>
     set((state) => ({
       livePrices: { ...state.livePrices, [symbol]: price },

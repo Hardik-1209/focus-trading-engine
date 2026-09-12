@@ -89,6 +89,24 @@ async function watchCoin(symbol: string, cycleNumber: number): Promise<'trade_cl
     // Detect signal with 5m multi-timeframe confirmation
     const signal = detectSignal(allCandles, latestCandle.close, ws.candles5m);
 
+    // Broadcast live telemetry indicators to engine_status for dashboard
+    updateEngineStatus({
+      focused_symbol: symbol,
+      cycle_count: cycleNumber,
+      active_trades_count: getActivePositionsCount(),
+      live_indicators: {
+        price: latestCandle.close,
+        rsi: parseFloat(signal.indicators.rsi.toFixed(1)),
+        adx: parseFloat(signal.indicators.adx.toFixed(1)),
+        chop: parseFloat(signal.indicators.chop.toFixed(1)),
+        vwap: parseFloat(signal.indicators.vwap.toFixed(4)),
+        mtf: signal.indicators.mtfTrend,
+        atr: parseFloat(signal.indicators.atr.toFixed(4)),
+        volZ: parseFloat(signal.indicators.volumeZ.toFixed(2)),
+        timestamp: new Date().toISOString(),
+      },
+    }).catch(() => {});
+
     if (signal.action === 'WAIT') {
       if (latestCandle.timestamp !== lastLoggedMinute) {
         console.log(`[Engine] ⏳ ${signal.reason}`);

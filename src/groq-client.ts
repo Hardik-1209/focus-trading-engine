@@ -92,7 +92,7 @@ async function callGroqWithRotation(system: string, user: string, timeoutMs = 12
           ],
           response_format: { type: 'json_object' },
           temperature: 0.1,
-          max_tokens: 512,
+          max_tokens: 800,
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -129,6 +129,7 @@ export async function evaluateNarrativeWithGroq(
   const system =
     'You are an expert quantitative crypto research analyst. ' +
     'Evaluate narrative strength and catalyst potential. ' +
+    'Keep reasoning under 25 words. ' +
     'Return ONLY valid JSON matching this schema: {"narrative_category": string, "confidence_score": number (0-100), "reasoning": string}.' +
     (skillContext ? `\nContext: ${skillContext}` : '');
 
@@ -145,6 +146,7 @@ export async function evaluateRiskVerdictWithGroq(params: RiskParams): Promise<R
   const system =
     'You are an elite quantitative crypto risk manager. ' +
     'Evaluate short-term futures trade viability based on technical momentum, volume flow, and narrative alignment. ' +
+    'Be decisive: favor LONG or SHORT when trend and momentum agree. Keep reasoning under 25 words. ' +
     'Return ONLY valid JSON matching this schema: {"verdict": "LONG" | "SHORT" | "VETO" | "WARN", "allocationUsd": number (0-100), "reasoning": string}.';
 
   const user =
@@ -156,10 +158,10 @@ export async function evaluateRiskVerdictWithGroq(params: RiskParams): Promise<R
     `VolumeZ=${params.technicalBlock.latestZScore.toFixed(2)}\n` +
     `Narrative: ${JSON.stringify(params.narrativeBlock)}\n\n` +
     `Rules:\n` +
-    `- LONG: RSI bullish, Price>EMA, ADX>22, MACD bullish, not hostile\n` +
-    `- SHORT: RSI bearish, Price<EMA, ADX>22, MACD bearish\n` +
-    `- VETO: scam risk or macro hostile\n` +
-    `- WARN: chop, conflicting indicators\n\n` +
+    `- LONG: RSI bullish (>48), Price>EMA or MACD bullish, not hostile. High probability.\n` +
+    `- SHORT: RSI bearish (<52), Price<EMA or MACD bearish, not hostile. High probability.\n` +
+    `- VETO: scam risk or severe macro hostile\n` +
+    `- WARN: extreme conflict only\n\n` +
     `Return JSON: {"verdict":"LONG"|"SHORT"|"VETO"|"WARN","allocationUsd":number(0-100),"reasoning":"string"}`;
 
   return callGroqWithRotation(system, user);

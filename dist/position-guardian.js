@@ -212,14 +212,38 @@ async function onTick(tick) {
         await closePosition(pos, currentPrice, trailReason);
         return;
     }
-    // If min hold time is not yet met, keep trade open unless stopped out above
-    if (!isHoldMet)
-        return;
-    // ─── 3. TAKE PROFIT TARGET ───────────────────────────────────────────────────
+    // ─── 2.5 DYNAMIC ATR BREAKEVEN STOP ─────────────────────────────────────────
+    if (pos.atr && pos.atr > 0) {
+        const isProfitable = pos.positionSide === 'LONG'
+            ? (currentPrice - pos.entryPrice) >= (pos.atr * 1.0)
+            : (pos.entryPrice - currentPrice) >= (pos.atr * 1.0);
+        if (isProfitable && !pos.stopLossPrice) {
+            // Move stop loss to breakeven + round-trip fee
+            const breakevenPrice = pos.positionSide === 'LONG'
+                ? pos.entryPrice * (1 + FEE_RATE * 2)
+                : pos.entryPrice * (1 - FEE_RATE * 2);
+            pos.stopLossPrice = breakevenPrice;
+            console.log(`[Guardian] 🛡️ ${pos.symbol} Breakeven Stop Activated @ $${breakevenPrice.toFixed(4)} (Guaranteed Risk-Free)`);
+        }
+        if (pos.stopLossPrice) {
+            if (pos.positionSide === 'LONG' && currentPrice <= pos.stopLossPrice) {
+                await closePosition(pos, currentPrice, `BREAKEVEN_STOP: Protected capital at $${pos.stopLossPrice.toFixed(4)}`);
+                return;
+            }
+            else if (pos.positionSide === 'SHORT' && currentPrice >= pos.stopLossPrice) {
+                await closePosition(pos, currentPrice, `BREAKEVEN_STOP: Protected capital at $${pos.stopLossPrice.toFixed(4)}`);
+                return;
+            }
+        }
+    }
+    // ─── 3. TAKE PROFIT TARGET (Instant Execution upon reaching target) ─────────
     if (returnPct >= TAKE_PROFIT_PCT) {
         await closePosition(pos, currentPrice, `TAKE_PROFIT: Reached target +${(returnPct * 100).toFixed(2)}%`);
         return;
     }
+    // If min hold time is not yet met, keep trade open unless stopped or taken profit
+    if (!isHoldMet)
+        return;
     // ─── 4. MAX HOLD DURATION ────────────────────────────────────────────────────
     if (hoursHeld >= MAX_HOLD_HOURS) {
         await closePosition(pos, currentPrice, `MAX_HOLD_TIME: ${hoursHeld.toFixed(2)}h elapsed`);

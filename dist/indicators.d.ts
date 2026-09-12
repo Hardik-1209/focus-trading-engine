@@ -1,6 +1,6 @@
 /**
  * indicators.ts
- * Quantitative indicator engine — EMA, RSI, MACD, ADX, ATR, Volume Z-Score, and MTF Trend.
+ * Quantitative indicator engine — EMA, RSI, MACD, ADX, ATR, Volume Z-Score, Choppiness Index (CHOP), VWAP, and MTF Trend.
  */
 export interface Candle {
     timestamp: number;
@@ -20,16 +20,26 @@ export declare function calculateRSI(closes: number[], period?: number): number[
 export declare function calculateMACD(closes: number[], fast?: number, slow?: number, signal?: number): MACDResult;
 export declare function calculateADX(candles: Candle[], period?: number): number[];
 export declare function calculateATR(candles: Candle[], period?: number): number[];
-export declare function calculateVolumeZScores(volumes: number[], period: number): number[];
+export declare function calculateVolumeZScores(volumes: number[], period?: number): number[];
+/**
+ * Choppiness Index (CHOP)
+ * Range: 0 to 100
+ * > 61.8 = Market is consolidating / choppy
+ * < 38.2 = Market is trending strongly
+ */
+export declare function calculateCHOP(candles: Candle[], period?: number): number[];
+/**
+ * Volume-Weighted Average Price (VWAP)
+ */
+export declare function calculateVWAP(candles: Candle[]): number[];
 export type HigherTimeframeTrend = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-/** Compute Higher Timeframe (5m) Macro Trend */
 export declare function computeMTFTrend(candles5m: Candle[]): {
     trend: HigherTimeframeTrend;
     emaFast: number;
     emaSlow: number;
     rsi5m: number;
 };
-/** Derive all signals from a candle array in one call */
+/** Derive all signals and filters from candle arrays */
 export declare function computeAllIndicators(candles1m: Candle[], candles5m?: Candle[]): {
     latestClose: number;
     latestEMA: number;
@@ -38,10 +48,14 @@ export declare function computeAllIndicators(candles1m: Candle[], candles5m?: Ca
     latestADX: number;
     latestATR: number;
     latestZScore: number;
+    latestCHOP: number;
+    latestVWAP: number;
     latestMACD: number;
     latestSignal: number;
     latestHist: number;
     prevHist: number;
+    isChoppy: boolean;
+    aboveVWAP: boolean;
     emaCrossover: boolean;
     ema50Bullish: boolean;
     rsiOversold: boolean;

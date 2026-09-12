@@ -11,6 +11,7 @@ export declare function updateEngineStatus(status: {
     active_trades_count?: number;
     active_groq_key_index?: number;
     is_running?: boolean;
+    live_indicators?: Record<string, any>;
 }): Promise<void>;
 export declare function logMarketSignal(params: {
     symbol: string;

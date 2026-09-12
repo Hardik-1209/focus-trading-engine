@@ -65,6 +65,8 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
           cycle_count: engineCycleCount,
           focused_coin: currentFocusedCoin,
           wallet_balance: wallet,
+          wallet_balance_inr: Math.round(wallet * 88.5 * 100) / 100,
+          inr_rate: 88.50,
           active_positions_count: openTrades.length,
           active_positions: openTrades.map(t => ({
             symbol: t.symbol,

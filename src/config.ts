@@ -55,7 +55,7 @@ export const SIGNAL = {
   RSI_TREND_SHORT: 48,
   ADX_STRONG: 25,
   ADX_WEAK: 20,
-  VOLUME_ZSCORE_MIN: 1.2,
-  SIGNAL_COOLDOWN_MS: 5 * 60 * 1000, // 5 min cooldown per coin
+  VOLUME_ZSCORE_MIN: 1.0,
+  SIGNAL_COOLDOWN_MS: 2 * 60 * 1000, // 2 min cooldown per coin for responsive scalping
   USE_5M_FILTER: true,
 } as const;

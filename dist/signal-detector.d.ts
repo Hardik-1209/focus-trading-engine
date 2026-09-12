@@ -9,11 +9,14 @@ export interface DetectedSignal {
         rsi: number;
         adx: number;
         atr: number;
+        chop: number;
+        vwap: number;
         macdHist: number;
         macdBullish: boolean;
         macdBearish: boolean;
         emaCrossover: boolean;
         ema50Bullish: boolean;
+        aboveVWAP: boolean;
         volumeZ: number;
         latestClose: number;
         latestEMA: number;
