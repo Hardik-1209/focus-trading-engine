@@ -25,6 +25,8 @@ export declare function logMarketSignal(params: {
 }): Promise<void>;
 export declare function fetchWalletBalance(): Promise<number>;
 export declare function adjustWalletBalanceAtomic(pnlDelta: number): Promise<void>;
+export declare function fetchCurrentEngineCycle(): Promise<number>;
+export declare function getActiveSessionId(): Promise<string>;
 export declare function insertFuturesTrade(params: {
     symbol: string;
     position_side: 'LONG' | 'SHORT';
@@ -33,6 +35,9 @@ export declare function insertFuturesTrade(params: {
     status: 'OPEN' | 'FAILED';
     tier?: number;
     llm_source?: string;
+    ai_reasoning?: string;
+    indicators_at_entry?: Record<string, any>;
+    session_id?: string;
     take_profit_price?: number;
     stop_loss_price?: number;
     trailing_stop_pct?: number;

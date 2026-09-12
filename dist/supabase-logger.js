@@ -5,6 +5,8 @@ exports.updateEngineStatus = updateEngineStatus;
 exports.logMarketSignal = logMarketSignal;
 exports.fetchWalletBalance = fetchWalletBalance;
 exports.adjustWalletBalanceAtomic = adjustWalletBalanceAtomic;
+exports.fetchCurrentEngineCycle = fetchCurrentEngineCycle;
+exports.getActiveSessionId = getActiveSessionId;
 exports.insertFuturesTrade = insertFuturesTrade;
 exports.fetchOpenFuturesTrades = fetchOpenFuturesTrades;
 exports.updateFuturesTrade = updateFuturesTrade;
@@ -36,11 +38,12 @@ async function logHealth(params) {
 // ─── Engine Status & Telemetry ────────────────────────────────────────────────
 async function updateEngineStatus(status) {
     try {
-        // Calculate total trades metrics
+        // Calculate total trades metrics for active (unarchived) session
         const { data: closedTrades } = await supabase
             .from('futures_trades')
             .select('realized_pnl')
-            .eq('status', 'CLOSED');
+            .eq('status', 'CLOSED')
+            .or('is_archived.is.null,is_archived.eq.false');
         let totalPnl = 0;
         let wins = 0;
         const totalCount = closedTrades?.length || 0;
@@ -126,10 +129,44 @@ async function adjustWalletBalanceAtomic(pnlDelta) {
         .eq('id', wallet.id);
 }
 // ─── Futures Trades ───────────────────────────────────────────────────────────
+async function fetchCurrentEngineCycle() {
+    try {
+        const { data } = await supabase
+            .from('engine_status')
+            .select('cycle_count')
+            .eq('id', 'primary')
+            .single();
+        return data?.cycle_count || 1;
+    }
+    catch {
+        return 1;
+    }
+}
+async function getActiveSessionId() {
+    try {
+        const { data } = await supabase
+            .from('trading_sessions')
+            .select('id')
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        return data?.id || 'session_1';
+    }
+    catch {
+        return 'session_1';
+    }
+}
 async function insertFuturesTrade(params) {
+    const sessionId = params.session_id || await getActiveSessionId();
     const { data, error } = await supabase
         .from('futures_trades')
-        .insert({ ...params, created_at: new Date().toISOString() })
+        .insert({
+        ...params,
+        session_id: sessionId,
+        is_archived: false,
+        created_at: new Date().toISOString()
+    })
         .select('id')
         .single();
     if (error)

@@ -25,7 +25,7 @@ export const CONFIG = {
     process.env.GROQ_API_KEY5, process.env.GROQ_API_KEY6,
     process.env.GROQ_API_KEY7,
   ].filter(Boolean) as string[],
-  WATCH_DURATION_MS:   parseInt(optional('WATCH_DURATION_MINUTES', '30')) * 60 * 1000,
+  WATCH_DURATION_MS:   parseInt(optional('WATCH_DURATION_MINUTES', '5')) * 60 * 1000,
   DRY_RUN:             optional('DRY_RUN', 'true') !== 'false',
   MIN_VOLUME_USDT:     parseFloat(optional('MIN_VOLUME_USDT', '500000')),
   CLOUD_API_URL:       optional('CLOUD_API_URL', 'http://localhost:3001'),

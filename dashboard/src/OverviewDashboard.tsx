@@ -3,6 +3,8 @@ import { useGlobalStore } from './store/useGlobalStore';
 import type { DashboardPage } from './store/useGlobalStore';
 import { useSupabaseStream } from './hooks/useSupabaseStream';
 import { useBitgetLivePrice } from './hooks/useBitgetLivePrice';
+import { TradeDetailModal } from './components/TradeDetailModal';
+import { ResetSessionModal } from './components/ResetSessionModal';
 import {
   formatUSD,
   formatINR,
@@ -26,7 +28,10 @@ import {
   Cpu,
   RefreshCw,
   DollarSign,
-  CheckCircle2
+  CheckCircle2,
+  RotateCcw,
+  Sparkles,
+  Archive,
 } from 'lucide-react';
 
 export function OverviewDashboard() {
@@ -43,13 +48,36 @@ export function OverviewDashboard() {
     walletBalance,
     inrRate,
     livePrices,
+    sessions,
+    selectedSessionId,
+    setSelectedSessionId,
+    selectedTrade,
+    setSelectedTrade,
   } = useGlobalStore();
 
   const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'LONG' | 'SHORT'>('ALL');
+  const [showResetModal, setShowResetModal] = useState(false);
+
+  // Session Filtering: 'active' shows unarchived live trades, specific session ID shows that snapshot, 'all' shows all
+  const sessionTrades = trades.filter((t) => {
+    if (selectedSessionId === 'all') return true;
+    if (selectedSessionId === 'active') return !t.is_archived;
+    return t.session_id === selectedSessionId;
+  });
+
+  const selectedSession = sessions.find((s) => s.id === selectedSessionId);
+  const displayBalance = (selectedSessionId !== 'active' && selectedSession?.final_balance !== undefined)
+    ? selectedSession.final_balance
+    : walletBalance;
 
   // Active open trade (if any)
-  const openTrades = trades.filter((t) => t.status === 'OPEN');
-  const closedTrades = trades.filter((t) => t.status === 'CLOSED');
+  const openTrades = sessionTrades.filter((t) => t.status === 'OPEN');
+  const closedTrades = sessionTrades.filter((t) => t.status === 'CLOSED');
+
+  const sessionRealizedPnl = closedTrades.reduce((acc, t) => acc + parseFloat((t.realized_pnl as any) || '0'), 0);
+  const displayPnl = (selectedSessionId !== 'active' && selectedSession?.total_pnl !== undefined)
+    ? selectedSession.total_pnl
+    : sessionRealizedPnl;
 
   // Filtered closed trades
   const filteredClosedTrades = closedTrades.filter((t) => {
@@ -125,7 +153,7 @@ export function OverviewDashboard() {
             </div>
           </div>
 
-          {/* Currency Pill & Live Engine Status */}
+          {/* Currency Pill & Session Controls & Status */}
           <div className="flex items-center gap-2 md:gap-3">
             {/* Live INR Conversion Badge */}
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-semibold text-slate-300 shadow-sm">
@@ -134,13 +162,42 @@ export function OverviewDashboard() {
               <span className="text-emerald-400 font-bold">₹{inrRate.toFixed(2)}</span>
             </div>
 
+            {/* Session / Snapshot Selector Dropdown */}
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs">
+              <Archive className="w-3.5 h-3.5 text-cyan-400 hidden sm:inline" />
+              <select
+                value={selectedSessionId}
+                onChange={(e) => setSelectedSessionId(e.target.value)}
+                className="bg-transparent text-slate-200 text-xs font-bold focus:outline-none cursor-pointer max-w-[120px] sm:max-w-[190px] truncate"
+              >
+                <option value="active" className="bg-slate-900 text-emerald-400 font-bold">🟢 Active Live Session</option>
+                {sessions.map((s, idx) => (
+                  <option key={s.id} value={s.id} className="bg-slate-900 text-slate-200">
+                    📦 {s.name || `Snapshot #${idx + 1}`} ({s.total_trades}T · {s.total_pnl >= 0 ? '+' : ''}${s.total_pnl})
+                  </option>
+                ))}
+                <option value="all" className="bg-slate-900 text-indigo-300 font-bold">📚 All-Time Combined</option>
+              </select>
+            </div>
+
+            {/* Reset Session Button */}
+            <button
+              onClick={() => setShowResetModal(true)}
+              title="Archive current session trades and reset to $10.00 capital & Cycle #1"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden sm:inline">Reset</span>
+            </button>
+
             {/* Live Status Pill */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 text-xs font-bold shadow-sm shadow-emerald-950/50">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="tracking-wide">24/7 ACTIVE</span>
+              <span className="tracking-wide hidden sm:inline">24/7 ACTIVE</span>
+              <span className="tracking-wide sm:hidden">LIVE</span>
             </div>
           </div>
         </div>
@@ -181,6 +238,31 @@ export function OverviewDashboard() {
 
       {/* ─── MAIN CONTENT CONTAINER ────────────────────────────────────────────── */}
       <main className="max-w-7xl mx-auto px-4 md:px-8 mt-5 space-y-5">
+        {/* ─── HISTORICAL SNAPSHOT BANNER (IF VIEWING ARCHIVED SESSION) ───────────── */}
+        {selectedSessionId !== 'active' && (
+          <div className="bg-gradient-to-r from-amber-950/70 via-slate-900/90 to-amber-950/70 border border-amber-500/40 text-amber-200 px-4 py-3 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                <Archive className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-black block">
+                  Viewing Historical Snapshot: {selectedSession?.name || (selectedSessionId === 'all' ? 'All-Time Combined Ledger' : 'Archived Snapshot')}
+                </span>
+                <span className="text-[11px] text-amber-300/80">
+                  {selectedSession ? `Archived with ${selectedSession.total_trades} trades · P&L: ${selectedSession.total_pnl >= 0 ? '+' : ''}$${selectedSession.total_pnl}` : 'All historical snapshots and active trades combined.'}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedSessionId('active')}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all shadow cursor-pointer active:scale-95"
+            >
+              Return to Live Active Session ➔
+            </button>
+          </div>
+        )}
+
         {/* ─── TELEMETRY TICKER BAR ────────────────────────────────────────────── */}
         <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-lg">
           <div className="flex items-center gap-2.5">
@@ -188,11 +270,17 @@ export function OverviewDashboard() {
               <Eye className="w-4 h-4 animate-pulse" />
             </div>
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Current Focus Coin</div>
+              <div className="text-[11px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
+                <span>Current Focus Coin</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              </div>
               <div className="text-sm font-extrabold text-white flex items-center gap-2">
                 <span>{focusedCoin}</span>
-                <span className="text-[11px] text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
+                <span className="text-[11px] text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40 font-mono font-bold">
                   Cycle #{cycleCount}
+                </span>
+                <span className="text-[10px] text-slate-400 hidden sm:inline font-normal">
+                  · 5m momentum rotation active
                 </span>
               </div>
             </div>
@@ -243,11 +331,11 @@ export function OverviewDashboard() {
               <DollarSign className="w-4 h-4 text-cyan-400" />
             </div>
             <div className="text-xl md:text-2xl font-black text-white tracking-tight">
-              {formatUSD(walletBalance)}
+              {formatUSD(displayBalance)}
             </div>
             <div className="mt-1 flex items-center gap-1.5">
               <span className="text-xs font-extrabold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {formatINR(walletBalance, inrRate)}
+                {formatINR(displayBalance, inrRate)}
               </span>
               <span className="text-[10px] text-slate-500 font-medium">Virtual Capital</span>
             </div>
@@ -259,12 +347,12 @@ export function OverviewDashboard() {
               <span>NET REALIZED PNL</span>
               <TrendingUp className="w-4 h-4 text-emerald-400" />
             </div>
-            <div className={`text-xl md:text-2xl font-black tracking-tight ${telemetry.realizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {telemetry.realizedPnl >= 0 ? '+' : ''}{formatUSD(telemetry.realizedPnl)}
+            <div className={`text-xl md:text-2xl font-black tracking-tight ${displayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {displayPnl >= 0 ? '+' : ''}{formatUSD(displayPnl)}
             </div>
             <div className="mt-1 flex items-center gap-1.5">
-              <span className={`text-xs font-extrabold px-2 py-0.5 rounded border ${telemetry.realizedPnl >= 0 ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800/40' : 'text-rose-400 bg-rose-950/60 border-rose-800/40'}`}>
-                {telemetry.realizedPnl >= 0 ? '+' : ''}{formatINR(telemetry.realizedPnl, inrRate)}
+              <span className={`text-xs font-extrabold px-2 py-0.5 rounded border ${displayPnl >= 0 ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800/40' : 'text-rose-400 bg-rose-950/60 border-rose-800/40'}`}>
+                {displayPnl >= 0 ? '+' : ''}{formatINR(displayPnl, inrRate)}
               </span>
               <span className="text-[10px] text-slate-500 font-medium">{totalClosed} closed trades</span>
             </div>
@@ -374,6 +462,15 @@ export function OverviewDashboard() {
                       <div className="text-[10px] text-slate-400">{formatUSD(amount * entry)} Notional</div>
                     </div>
                   </div>
+
+                  {/* Audit Button */}
+                  <button
+                    onClick={() => setSelectedTrade(pos)}
+                    className="mt-3.5 w-full py-2.5 px-4 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-2xl text-cyan-300 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <Sparkles className="w-4 h-4 text-cyan-400" />
+                    <span>View Live Groq AI Reasoning & Indicator Confluence</span>
+                  </button>
                 </div>
               );
             })}
@@ -685,17 +782,23 @@ export function OverviewDashboard() {
                     return (
                       <div
                         key={t.id}
-                        className="bg-slate-950 p-4 rounded-2xl border border-slate-850 space-y-2.5"
+                        onClick={() => setSelectedTrade(t)}
+                        className="bg-slate-950 p-4 rounded-2xl border border-slate-850 hover:border-cyan-500/50 hover:bg-slate-900/60 space-y-2.5 cursor-pointer transition-all active:scale-[0.99] group shadow-sm"
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${t.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
                               {t.position_side}
                             </span>
-                            <span className="font-extrabold text-white text-sm">{t.symbol}</span>
+                            <span className="font-extrabold text-white text-sm group-hover:text-cyan-300 transition-colors">{t.symbol}</span>
                           </div>
-                          <div className={`font-black text-sm ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isWin ? '+' : ''}{formatUSD(pnl)}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-cyan-400 font-bold flex items-center gap-0.5">
+                              <Sparkles className="w-3 h-3" /> Audit
+                            </span>
+                            <div className={`font-black text-sm ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isWin ? '+' : ''}{formatUSD(pnl)}
+                            </div>
                           </div>
                         </div>
 
@@ -734,6 +837,7 @@ export function OverviewDashboard() {
                         <th className="pb-3 font-bold">Realized P&L</th>
                         <th className="pb-3 font-bold">Reason</th>
                         <th className="pb-3 font-bold">Closed Time (IST)</th>
+                        <th className="pb-3 font-bold text-right pr-2">Audit</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-900">
@@ -744,13 +848,21 @@ export function OverviewDashboard() {
                         const exit = parseFloat((t.exit_price as any) || '0');
 
                         return (
-                          <tr key={t.id} className="hover:bg-slate-900/40 transition-colors">
+                          <tr
+                            key={t.id}
+                            onClick={() => setSelectedTrade(t)}
+                            className="hover:bg-slate-800/40 cursor-pointer transition-colors group"
+                            title="Click to view full Groq AI Decision and indicators audit"
+                          >
                             <td className="py-3">
                               <div className="flex items-center gap-2">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${t.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
                                   {t.position_side}
                                 </span>
-                                <span className="font-extrabold text-white">{t.symbol}</span>
+                                <span className="font-extrabold text-white group-hover:text-cyan-300 transition-colors flex items-center gap-1.5">
+                                  {t.symbol}
+                                  <Sparkles className="w-3 h-3 text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </span>
                               </div>
                             </td>
                             <td className="py-3">
@@ -777,6 +889,11 @@ export function OverviewDashboard() {
                             <td className="py-3 text-slate-400 text-[11px]">
                               {formatIndianDateTime(t.closed_at || t.created_at)}
                             </td>
+                            <td className="py-3 text-right pr-2">
+                              <span className="text-[11px] font-bold text-cyan-400 opacity-80 group-hover:opacity-100 group-hover:underline flex items-center justify-end gap-1">
+                                <Sparkles className="w-3 h-3" /> Groq AI
+                              </span>
+                            </td>
                           </tr>
                         );
                       })}
@@ -787,6 +904,24 @@ export function OverviewDashboard() {
             )}
           </div>
         )}
+
+        {/* ─── MODALS ───────────────────────────────────────────────────────────── */}
+        <TradeDetailModal
+          trade={selectedTrade}
+          onClose={() => setSelectedTrade(null)}
+          inrRate={inrRate}
+        />
+
+        <ResetSessionModal
+          isOpen={showResetModal}
+          onClose={() => setShowResetModal(false)}
+          currentTrades={trades}
+          currentWalletBalance={walletBalance}
+          inrRate={inrRate}
+          onResetSuccess={() => {
+            setSelectedSessionId('active');
+          }}
+        />
       </main>
 
       {/* ─── MOBILE BOTTOM NAVIGATION BAR (FIXED FOR SMARTPHONES) ─────────────── */}

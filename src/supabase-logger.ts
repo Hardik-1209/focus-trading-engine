@@ -41,11 +41,12 @@ export async function updateEngineStatus(status: {
   live_indicators?: Record<string, any>;
 }) {
   try {
-    // Calculate total trades metrics
+    // Calculate total trades metrics for active (unarchived) session
     const { data: closedTrades } = await supabase
       .from('futures_trades')
       .select('realized_pnl')
-      .eq('status', 'CLOSED');
+      .eq('status', 'CLOSED')
+      .or('is_archived.is.null,is_archived.eq.false');
 
     let totalPnl = 0;
     let wins = 0;
@@ -142,6 +143,34 @@ export async function adjustWalletBalanceAtomic(pnlDelta: number): Promise<void>
 
 // ─── Futures Trades ───────────────────────────────────────────────────────────
 
+export async function fetchCurrentEngineCycle(): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from('engine_status')
+      .select('cycle_count')
+      .eq('id', 'primary')
+      .single();
+    return data?.cycle_count || 1;
+  } catch {
+    return 1;
+  }
+}
+
+export async function getActiveSessionId(): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('trading_sessions')
+      .select('id')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data?.id || 'session_1';
+  } catch {
+    return 'session_1';
+  }
+}
+
 export async function insertFuturesTrade(params: {
   symbol:        string;
   position_side: 'LONG' | 'SHORT';
@@ -150,15 +179,24 @@ export async function insertFuturesTrade(params: {
   status:        'OPEN' | 'FAILED';
   tier?:         number;
   llm_source?:   string;
+  ai_reasoning?: string;
+  indicators_at_entry?: Record<string, any>;
+  session_id?:   string;
   take_profit_price?: number;
   stop_loss_price?:   number;
   trailing_stop_pct?: number;
   atr?:               number;
   pipeline_candidate_id?: string;
 }) {
+  const sessionId = params.session_id || await getActiveSessionId();
   const { data, error } = await supabase
     .from('futures_trades')
-    .insert({ ...params, created_at: new Date().toISOString() })
+    .insert({
+      ...params,
+      session_id: sessionId,
+      is_archived: false,
+      created_at: new Date().toISOString()
+    })
     .select('id')
     .single();
   if (error) throw new Error(`Insert trade failed: ${error.message}`);

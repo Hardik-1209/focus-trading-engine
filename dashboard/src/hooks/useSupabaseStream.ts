@@ -57,6 +57,7 @@ export function useSupabaseStream() {
     updateTelemetry,
     setWalletBalance,
     setEngineStatus,
+    setSessions,
   } = useGlobalStore();
 
   useEffect(() => {
@@ -156,11 +157,26 @@ export function useSupabaseStream() {
       } catch { /* ignore fallback */ }
     };
 
+    // 3d. Fetch initial trading sessions
+    const fetchInitialSessions = async () => {
+      try {
+        const { data, error } = await client
+          .from('trading_sessions')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        if (data) setSessions(data as any);
+      } catch (err) {
+        console.error("Error fetching initial sessions:", err);
+      }
+    };
+
     fetchInitialLogs();
     fetchInitialTrades();
     fetchInitialHealth();
     fetchInitialWallet();
     fetchInitialEngineStatus();
+    fetchInitialSessions();
 
     // 4. Real-time Listeners
     const engineStatusChannel = client
@@ -247,14 +263,35 @@ export function useSupabaseStream() {
       )
       .subscribe();
 
+    const sessionsChannel = client
+      .channel('sessions_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'trading_sessions' },
+        () => {
+          fetchInitialSessions();
+        }
+      )
+      .subscribe();
+
+    // Auto-polling interval every 3s to guarantee live updates
+    const pollInterval = setInterval(() => {
+      fetchInitialEngineStatus();
+      fetchInitialWallet();
+      fetchInitialTrades();
+      fetchInitialSessions();
+    }, 3000);
+
     return () => {
+      clearInterval(pollInterval);
       client.removeChannel(engineStatusChannel);
       client.removeChannel(pipelineChannel);
       client.removeChannel(tradesChannel);
       client.removeChannel(healthChannel);
       client.removeChannel(walletChannel);
+      client.removeChannel(sessionsChannel);
     };
-  }, [setFocusLogs, setTrades, setHealthEvents, addFocusLog, addTrade, updateTrade, addHealthEvent, updateTelemetry, setWalletBalance, setEngineStatus]);
+  }, [setFocusLogs, setTrades, setHealthEvents, addFocusLog, addTrade, updateTrade, addHealthEvent, updateTelemetry, setWalletBalance, setEngineStatus, setSessions]);
 
   // Recalculate metrics when trades change
   useEffect(() => {

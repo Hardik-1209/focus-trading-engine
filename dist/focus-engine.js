@@ -48,9 +48,20 @@ async function watchCoin(symbol, cycleNumber) {
     const ws = new bitget_ws_1.BitgetWS(symbol);
     ws.seedCandles(bootstrapCandles1m, '1m');
     ws.seedCandles(bootstrapCandles5m, '5m');
+    // Immediately broadcast focused symbol & cycle to engine_status so UI is never stale
+    (0, supabase_logger_1.updateEngineStatus)({
+        focused_symbol: symbol,
+        cycle_count: cycleNumber,
+        active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
+        live_indicators: {
+            price: bootstrapCandles1m[bootstrapCandles1m.length - 1]?.close || 0,
+            timestamp: new Date().toISOString(),
+        },
+    }).catch(() => { });
     let tradeClosedSignal = false;
     let tradeOpened = false;
     let lastLoggedMinute = 0;
+    let stagnantCandlesCount = 0;
     ws.on('tick', (_tick) => {
         // Ticks are also monitored globally by position-guardian.ts
     });
@@ -87,6 +98,12 @@ async function watchCoin(symbol, cycleNumber) {
             },
         }).catch(() => { });
         if (signal.action === 'WAIT') {
+            if (signal.indicators.adx < 20 || signal.indicators.chop > 60) {
+                stagnantCandlesCount++;
+            }
+            else {
+                stagnantCandlesCount = 0;
+            }
             if (latestCandle.timestamp !== lastLoggedMinute) {
                 console.log(`[Engine] ⏳ ${signal.reason}`);
                 lastLoggedMinute = latestCandle.timestamp;
@@ -108,6 +125,7 @@ async function watchCoin(symbol, cycleNumber) {
             let finalAction = signal.action;
             let llmSource = 'rule-based';
             let confidenceScore = 80;
+            let llmReasoning = '';
             // Tier 2 — validate with Groq Cloud LLM
             if (!signal.skipLLM) {
                 console.log(`[Engine] 🤖 Tier 2 edge-case signal — requesting Groq Cloud LLM verification...`);
@@ -145,6 +163,7 @@ async function watchCoin(symbol, cycleNumber) {
                     isMacroHostile: false,
                 });
                 finalAction = verdict.verdict;
+                llmReasoning = `[${verdict.llmSource}] ${verdict.reasoning}`;
                 console.log(`[Engine] LLM verdict (${verdict.llmSource}): ${finalAction} — ${verdict.reasoning}`);
                 await (0, supabase_logger_1.logFocusEvent)({
                     event_type: 'LLM_EVALUATION',
@@ -169,7 +188,19 @@ async function watchCoin(symbol, cycleNumber) {
             });
             // Execute trade if approved
             if (finalAction === 'LONG' || finalAction === 'SHORT') {
-                await executeTrade(symbol, finalAction, latestCandle.close, signal.tier, llmSource, signal.indicators.atr);
+                const fullReasoning = llmReasoning || signal.reason;
+                await executeTrade(symbol, finalAction, latestCandle.close, signal.tier, llmSource, signal.indicators.atr, fullReasoning, {
+                    rsi: parseFloat(signal.indicators.rsi.toFixed(2)),
+                    adx: parseFloat(signal.indicators.adx.toFixed(2)),
+                    chop: parseFloat(signal.indicators.chop.toFixed(2)),
+                    vwap: parseFloat(signal.indicators.vwap.toFixed(4)),
+                    mtfTrend: signal.indicators.mtfTrend,
+                    atr: parseFloat(signal.indicators.atr.toFixed(6)),
+                    volumeZ: parseFloat(signal.indicators.volumeZ.toFixed(2)),
+                    macdHist: signal.indicators.macdHist,
+                    price: latestCandle.close,
+                    timestamp: new Date().toISOString(),
+                });
                 tradeOpened = true;
             }
             else {
@@ -184,8 +215,9 @@ async function watchCoin(symbol, cycleNumber) {
         }
     });
     ws.connect();
-    // 4. Wait until rotation timeout or trade completes
+    // 4. Wait until rotation timeout, trade completion, or stagnation exit
     const watchUntil = Date.now() + config_1.CONFIG.WATCH_DURATION_MS;
+    const minWatchUntil = Date.now() + 90000; // Allow at least 90s (1-2 candles) before evaluating stagnation
     while (Date.now() < watchUntil) {
         if (tradeClosedSignal) {
             ws.disconnect();
@@ -196,12 +228,18 @@ async function watchCoin(symbol, cycleNumber) {
             ws.disconnect();
             return 'trade_closed';
         }
+        // Early momentum rotation: don't sit on a dead/stagnant coin
+        if (!tradeOpened && Date.now() > minWatchUntil && stagnantCandlesCount >= 2) {
+            console.log(`[Engine] ⚡ Early rotation triggered for ${symbol}: 2 consecutive stagnant candles (ADX < 20 / CHOP > 60). Rotating to higher momentum coin...`);
+            ws.disconnect();
+            return 'stagnant_rotated';
+        }
         await sleep(1000);
     }
     ws.disconnect();
-    return tradeOpened ? 'no_trade' : 'no_trade';
+    return tradeOpened ? 'no_trade' : 'timeout';
 }
-async function executeTrade(symbol, side, price, tier, llmSource, atr = price * 0.015) {
+async function executeTrade(symbol, side, price, tier, llmSource, atr = price * 0.015, aiReasoning = '', indicatorsAtEntry = {}) {
     if (await (0, supabase_logger_1.checkRecentTrade)(symbol)) {
         console.warn(`[Engine] Idempotency guard: trade for ${symbol} placed in last 30s. Skipping.`);
         return;
@@ -227,6 +265,8 @@ async function executeTrade(symbol, side, price, tier, llmSource, atr = price * 
             status: 'OPEN',
             tier,
             llm_source: llmSource,
+            ai_reasoning: aiReasoning,
+            indicators_at_entry: indicatorsAtEntry,
             take_profit_price: takeProfitPrice,
             stop_loss_price: stopLossPrice,
             atr,
@@ -259,14 +299,25 @@ async function executeTrade(symbol, side, price, tier, llmSource, atr = price * 
 async function runFocusEngine() {
     console.log('\n🤖 Focus Trading Engine starting...');
     await (0, position_guardian_1.syncOpenPositions)();
-    let cycleCount = 0;
     while (true) {
-        cycleCount++;
+        // Read current cycle count from engine_status in case user reset it from dashboard!
+        const cycleCount = await (0, supabase_logger_1.fetchCurrentEngineCycle)();
         console.log(`\n[Engine] ━━━ Cycle #${cycleCount} ━━━`);
         (0, position_guardian_1.displayActiveTrades)();
         try {
+            await (0, supabase_logger_1.updateEngineStatus)({
+                focused_symbol: 'Scanning market...',
+                cycle_count: cycleCount,
+                active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
+            }).catch(() => { });
             const coin = await (0, coin_selector_1.selectHottestCoin)();
             const result = await watchCoin(coin.symbol, cycleCount);
+            // Increment cycle count in database for next loop
+            const nextCycle = cycleCount + 1;
+            await (0, supabase_logger_1.updateEngineStatus)({
+                cycle_count: nextCycle,
+                active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
+            }).catch(() => { });
             await (0, supabase_logger_1.logHealth)({
                 event_type: 'COIN_ROTATED',
                 component: 'focus-engine',
@@ -274,7 +325,7 @@ async function runFocusEngine() {
                 message: `Cycle #${cycleCount} finished on ${coin.symbol}. Result: ${result}. Rotating.`,
             });
             console.log(`\n[Engine] Rotation complete (${result}). Brief pause before next coin...`);
-            await sleep(5000);
+            await sleep(3000);
         }
         catch (err) {
             console.error(`[Engine] Cycle error: ${err.message}`);

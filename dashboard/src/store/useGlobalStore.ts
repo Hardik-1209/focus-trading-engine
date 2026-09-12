@@ -21,6 +21,23 @@ export interface FuturesTrade {
   exit_reason?: string;
   fee?: number | string;
   return_pct?: number | string;
+  session_id?: string;
+  is_archived?: boolean;
+  ai_reasoning?: string;
+  indicators_at_entry?: Record<string, any>;
+}
+
+export interface TradingSession {
+  id: string;
+  name: string;
+  created_at: string;
+  closed_at?: string;
+  initial_balance: number;
+  final_balance?: number;
+  total_trades: number;
+  win_rate: number;
+  total_pnl: number;
+  is_active: boolean;
 }
 
 export interface FocusLog {
@@ -90,6 +107,9 @@ interface GlobalStoreState {
   walletBalance: number;
   inrRate: number;
   livePrices: Record<string, number>;
+  sessions: TradingSession[];
+  selectedSessionId: string; // 'active' | 'all' | session_id
+  selectedTrade: FuturesTrade | null;
   setFocusLogs: (logs: FocusLog[]) => void;
   addFocusLog: (log: FocusLog) => void;
   setTrades: (trades: FuturesTrade[]) => void;
@@ -104,6 +124,10 @@ interface GlobalStoreState {
   setWalletBalance: (balance: number) => void;
   setInrRate: (rate: number) => void;
   setLivePrice: (symbol: string, price: number) => void;
+  setSessions: (sessions: TradingSession[]) => void;
+  addSession: (session: TradingSession) => void;
+  setSelectedSessionId: (id: string) => void;
+  setSelectedTrade: (trade: FuturesTrade | null) => void;
 }
 
 export const useGlobalStore = create<GlobalStoreState>((set) => ({
@@ -122,6 +146,9 @@ export const useGlobalStore = create<GlobalStoreState>((set) => ({
   walletBalance: 10.00,
   inrRate: 88.50,
   livePrices: {},
+  sessions: [],
+  selectedSessionId: 'active',
+  selectedTrade: null,
   setFocusLogs: (focusLogs) => set({ focusLogs }),
   addFocusLog: (log) =>
     set((state) => {
@@ -156,4 +183,11 @@ export const useGlobalStore = create<GlobalStoreState>((set) => ({
     set((state) => ({
       livePrices: { ...state.livePrices, [symbol]: price },
     })),
+  setSessions: (sessions) => set({ sessions }),
+  addSession: (session) =>
+    set((state) => ({
+      sessions: [session, ...state.sessions.filter((s) => s.id !== session.id)],
+    })),
+  setSelectedSessionId: (selectedSessionId) => set({ selectedSessionId }),
+  setSelectedTrade: (selectedTrade) => set({ selectedTrade }),
 }));
