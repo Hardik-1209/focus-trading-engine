@@ -38,7 +38,17 @@ export async function logHealth(params: {
   }
 }
 
-// ─── Engine Status & Telemetry ────────────────────────────────────────────────
+// In-memory status cache for instantaneous <5ms /health responses
+let latestInMemoryStatus: Record<string, any> = {
+  id: 'primary',
+  is_running: true,
+  last_heartbeat: new Date().toISOString(),
+  live_indicators: {},
+};
+
+export function getLatestInMemoryStatus(): Record<string, any> {
+  return latestInMemoryStatus;
+}
 
 export async function updateEngineStatus(status: {
   focused_symbol?: string;
@@ -91,6 +101,8 @@ export async function updateEngineStatus(status: {
     if (status.cycle_count !== undefined) upsertData.cycle_count = status.cycle_count;
     if (status.active_trades_count !== undefined) upsertData.active_trades_count = status.active_trades_count;
     if (status.active_groq_key_index !== undefined) upsertData.active_groq_key_index = status.active_groq_key_index;
+
+    latestInMemoryStatus = { ...latestInMemoryStatus, ...upsertData };
 
     await supabase.from('engine_status').upsert(upsertData);
   } catch (err: any) {

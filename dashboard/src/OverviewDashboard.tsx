@@ -38,6 +38,9 @@ import {
   Gauge,
   Sliders,
   ChevronRight,
+  Shield,
+  Layers,
+  ArrowUpRight,
 } from 'lucide-react';
 
 export function OverviewDashboard() {
@@ -64,6 +67,11 @@ export function OverviewDashboard() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [showKeyHealthModal, setShowKeyHealthModal] = useState(false);
 
+  // Switch tab and instantly scroll to top of page (no sluggish scrolling delay on mobile)
+  const handleTabSwitch = (page: DashboardPage) => {
+    setActivePage(page);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+  };
 
   // Session Filtering: 'active' shows unarchived live trades, specific session ID shows that snapshot, 'all' shows all
   const sessionTrades = trades.filter((t) => {
@@ -110,7 +118,7 @@ export function OverviewDashboard() {
     { time: 'Now', pnl: 0, inrPnl: 0 }
   ];
 
-  // Live Indicators from Engine Status (or default v3.0 fallback)
+  // Live Indicators from Engine Status (or default v3.1 fallback)
   const liveInd = engineStatus?.live_indicators || {
     rsi: 50.0,
     adx: 22.5,
@@ -132,7 +140,13 @@ export function OverviewDashboard() {
       llmTotalEvaluations: 0,
       llmApprovals: 0,
       llmApprovalRate: 0,
-      version: '3.0.0',
+      version: '3.1.0',
+    },
+    gemini_cluster: {
+      provider: 'Google Gemini',
+      model: 'gemini-3.6-flash',
+      totalKeys: 6,
+      activeKeyIndex: 1,
     }
   };
 
@@ -147,10 +161,10 @@ export function OverviewDashboard() {
     llmTotalEvaluations: 0,
     llmApprovals: 0,
     llmApprovalRate: 0,
-    version: '3.0.0',
+    version: '3.1.0',
   };
 
-  const focusedCoin = engineStatus?.focused_symbol || 'Scanning (v3.0)...';
+  const focusedCoin = engineStatus?.focused_symbol || 'Scanning (v3.1)...';
   const cycleCount = engineStatus?.cycle_count || 1;
 
   // Realized stats
@@ -170,7 +184,7 @@ export function OverviewDashboard() {
   const activeCooldowns = riskGov.activeCooldowns || [];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-28 md:pb-12 antialiased selection:bg-cyan-500/20">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-24 md:pb-12 antialiased selection:bg-cyan-500/20">
       {/* ─── STICKY HEADER ──────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-xl border-b border-slate-850 px-3 py-2.5 sm:px-6 md:px-8">
         <div className="max-w-7xl mx-auto">
@@ -250,7 +264,7 @@ export function OverviewDashboard() {
                 className="bg-transparent text-slate-200 text-xs font-bold focus:outline-none cursor-pointer w-full truncate"
               >
                 <option value="active" className="bg-slate-900 text-emerald-400 font-bold">
-                  🟢 Active Live Session (v3.0 Clean Slate)
+                  🟢 Active Live Session (v3.1 Clean Slate)
                 </option>
                 {sessions.map((s, idx) => (
                   <option key={s.id} value={s.id} className="bg-slate-900 text-slate-200">
@@ -283,7 +297,7 @@ export function OverviewDashboard() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActivePage(tab.id as DashboardPage)}
+                  onClick={() => handleTabSwitch(tab.id as DashboardPage)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                     isActive
                       ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-950/50'
@@ -331,557 +345,816 @@ export function OverviewDashboard() {
           </div>
         )}
 
-        {/* ─── V3.0 INSTITUTIONAL RISK GOVERNANCE & HEALTH STRIP ─────────────────── */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-xl">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
-            {/* Left: Circuit Breaker & Kill Switch Status */}
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-semibold text-slate-300">
-                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="text-slate-400 text-[11px]">Circuit Breakers:</span>
-                {activeCooldowns.length === 0 ? (
-                  <span className="text-emerald-400 font-bold text-[11px]">🛡️ All Pairs Active</span>
-                ) : (
-                  <span className="text-amber-400 font-bold text-[11px]">
-                    ⚠️ {activeCooldowns.length} Symbol{activeCooldowns.length > 1 ? 's' : ''} Frozen
-                  </span>
-                )}
-              </div>
-
-              {/* Daily Drawdown Gauge */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-semibold text-slate-300">
-                <Gauge className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-slate-400 text-[11px]">Daily DD:</span>
-                <span className={`font-bold text-[11px] ${riskGov.dailyDrawdownPct > 3 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                  {(riskGov.dailyDrawdownPct || 0).toFixed(2)}%
-                </span>
-                <span className="text-slate-500 text-[10px]">/ 5.0% Kill Limit</span>
-              </div>
-
-              {/* Adversarial CRO Approval Rate */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-semibold text-slate-300">
-                <Scale className="w-3.5 h-3.5 text-purple-400" />
-                <span className="text-slate-400 text-[11px]">CRO Approval:</span>
-                <span className="text-purple-300 font-bold text-[11px]">
-                  {(riskGov.llmApprovalRate || 0).toFixed(1)}%
-                </span>
-                <span className="text-slate-500 text-[10px] hidden sm:inline">(Target: 20-35%)</span>
-              </div>
-            </div>
-
-            {/* Right: Rolling Expectancy EV & Sizing */}
-            <div className="flex items-center gap-2 text-xs">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-950/40 border border-cyan-800/40 font-bold text-cyan-300">
-                <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-                <span>3x Leverage · 1.8x / 3.2x ATR Stop</span>
-              </div>
-            </div>
-          </div>
-
-          {/* If there are frozen coins in cooldown, display warning bar */}
-          {activeCooldowns.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-slate-850 flex flex-wrap items-center gap-1.5 text-[11px]">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="text-amber-300 font-bold">Cooldown Active:</span>
-              {activeCooldowns.map((cd) => (
-                <span key={cd.symbol} className="px-2 py-0.5 rounded bg-amber-950/60 border border-amber-500/40 text-amber-200 font-mono font-semibold">
-                  {cd.symbol} ({cd.cooldownRemainingMin}m left · {cd.consecutiveLosses} losses)
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ─── TELEMETRY TICKER BAR & SWIPEABLE CHIP STRIP (MOBILE OPTIMIZED) ──────── */}
-        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-3 sm:p-3.5 shadow-lg space-y-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
-                <Eye className="w-4 h-4 animate-pulse" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1">
-                  <span>Current Target</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                </div>
-                <div className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5 truncate">
-                  <span className="truncate">{focusedCoin}</span>
-                  <span className="text-[10px] text-cyan-400 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40 font-mono font-bold shrink-0">
-                    Cycle #{cycleCount}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="text-right shrink-0">
-              <div className="text-[10px] text-slate-500 uppercase font-semibold">15m Regime</div>
-              <div className="text-xs font-black text-emerald-400 uppercase">
-                {liveInd.regime || 'EXPANSION'}
-              </div>
-            </div>
-          </div>
-
-          {/* Swipeable Indicator Chips Strip (Native Touch Scroll on Phone) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 text-xs select-none">
-            <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
-              <span className="text-slate-500">RSI:</span>
-              <span className={liveInd.rsi > 65 ? 'text-rose-400' : liveInd.rsi < 35 ? 'text-emerald-400' : 'text-cyan-400'}>
-                {liveInd.rsi?.toFixed(1) || '50.0'}
-              </span>
-            </div>
-
-            <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
-              <span className="text-slate-500">ADX:</span>
-              <span className={liveInd.adx > 25 ? 'text-emerald-400' : 'text-amber-400'}>
-                {liveInd.adx?.toFixed(1) || '22.0'}
-              </span>
-            </div>
-
-            <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
-              <span className="text-slate-500">CHOP:</span>
-              <span className={liveInd.chop > 61.8 ? 'text-rose-400' : 'text-emerald-400'}>
-                {liveInd.chop?.toFixed(1) || '44.0'}
-              </span>
-            </div>
-
-            <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
-              <span className="text-slate-500">15m MTF:</span>
-              <span className={liveInd.mtf?.includes('BULL') ? 'text-emerald-400' : liveInd.mtf?.includes('BEAR') ? 'text-rose-400' : 'text-slate-400'}>
-                {liveInd.mtf || 'NEUTRAL'}
-              </span>
-            </div>
-
-            <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
-              <span className="text-slate-500">ATR:</span>
-              <span className="text-white">{formatUSD(liveInd.atr || 0)}</span>
-            </div>
-
-            <div className="px-2 py-1 rounded-lg bg-indigo-950/50 border border-indigo-500/30 font-bold text-indigo-300 shrink-0 text-[11px]">
-              CRO Gatekeeper Active
-            </div>
-          </div>
-        </div>
-
-        {/* ─── 4 TOP STAT CARDS (DUAL CURRENCY: USD + INR) ───────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
-          {/* Card 1: Balance */}
-          <div className="bg-slate-900/70 border border-slate-850 hover:border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg transition-all">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
-              <span>WALLET BALANCE</span>
-              <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
-            </div>
-            <div className="text-lg sm:text-2xl font-black text-white tracking-tight truncate">
-              {formatUSD(displayBalance)}
-            </div>
-            <div className="mt-1 flex items-center gap-1">
-              <span className="text-[10px] sm:text-xs font-extrabold text-emerald-400 bg-emerald-950/60 px-1.5 sm:px-2 py-0.5 rounded border border-emerald-800/40 truncate">
-                {formatINR(displayBalance, inrRate)}
-              </span>
-            </div>
-          </div>
-
-          {/* Card 2: Net Realized PnL */}
-          <div className="bg-slate-900/70 border border-slate-850 hover:border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg transition-all">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
-              <span>NET REALIZED PNL</span>
-              <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
-            </div>
-            <div className={`text-lg sm:text-2xl font-black tracking-tight truncate ${displayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {displayPnl >= 0 ? '+' : ''}{formatUSD(displayPnl)}
-            </div>
-            <div className="mt-1 flex items-center gap-1">
-              <span className={`text-[10px] sm:text-xs font-extrabold px-1.5 sm:px-2 py-0.5 rounded border truncate ${displayPnl >= 0 ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800/40' : 'text-rose-400 bg-rose-950/60 border-rose-800/40'}`}>
-                {displayPnl >= 0 ? '+' : ''}{formatINR(displayPnl, inrRate)}
-              </span>
-              <span className="text-[9px] sm:text-[10px] text-slate-500 font-medium hidden sm:inline">{totalClosed} closed</span>
-            </div>
-          </div>
-
-          {/* Card 3: Win Rate */}
-          <div className="bg-slate-900/70 border border-slate-850 hover:border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg transition-all">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
-              <span>WIN RATE</span>
-              <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400" />
-            </div>
-            <div className="text-lg sm:text-2xl font-black text-white tracking-tight">
-              {winRate}%
-            </div>
-            <div className="mt-1 text-[10px] sm:text-[11px] text-slate-400 font-medium truncate">
-              <span className="text-emerald-400 font-bold">{winningTrades.length}W</span> · <span className="text-rose-400 font-bold">{losingTrades.length}L</span> · PF: <span className="text-white font-bold">{profitFactor}</span>
-            </div>
-          </div>
-
-          {/* Card 4: Active Positions */}
-          <div className="bg-slate-900/70 border border-slate-850 hover:border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg transition-all">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
-              <span>ACTIVE POSITION</span>
-              <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-            </div>
-            <div className="text-lg sm:text-2xl font-black text-white tracking-tight">
-              {openTrades.length} Open
-            </div>
-            <div className="mt-1 text-[10px] sm:text-[11px] text-slate-400 font-medium flex items-center gap-1 truncate">
-              <span className="text-cyan-400 font-bold">3x Leverage</span>
-              <span>· Triple Barrier</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ─── ACTIVE OPEN POSITION CARD (IF TRADE OPEN) ───────────────────────── */}
-        {openTrades.length > 0 ? (
-          <div className="space-y-3">
-            <h2 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
-              <span>Live Active Futures Position</span>
-            </h2>
-            {openTrades.map((pos) => {
-              const livePrice = livePrices[pos.symbol] || parseFloat(pos.entry_price as any);
-              const entry = parseFloat(pos.entry_price as any);
-              const amount = pos.amount;
-              const pnl = pos.position_side === 'LONG' ? (livePrice - entry) * amount : (entry - livePrice) * amount;
-              const roi = entry > 0 ? ((pnl / (entry * amount / 3)) * 100).toFixed(2) : '0.00';
-              const isProfit = pnl >= 0;
-
-              return (
-                <div
-                  key={pos.id}
-                  className="bg-gradient-to-br from-slate-900 to-slate-950 border-2 border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl relative overflow-hidden"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3 mb-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className={`px-2.5 py-1 rounded-xl text-xs font-black tracking-wider uppercase ${pos.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20' : 'bg-rose-500 text-white shadow-md shadow-rose-500/20'}`}>
-                        {pos.position_side} 3X
+        {/* ═════════════════════════════════════════════════════════════════════════
+            PAGE 1: OVERVIEW & EXECUTIVE METRICS
+            ═════════════════════════════════════════════════════════════════════════ */}
+        {activePage === 'overview' && (
+          <div className="space-y-3.5 sm:space-y-5 animate-fadeIn">
+            {/* Institutional Risk Governance Strip */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-semibold text-slate-300">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-slate-400 text-[11px]">Circuit Breakers:</span>
+                    {activeCooldowns.length === 0 ? (
+                      <span className="text-emerald-400 font-bold text-[11px]">🛡️ All Pairs Active</span>
+                    ) : (
+                      <span className="text-amber-400 font-bold text-[11px]">
+                        ⚠️ {activeCooldowns.length} Symbol{activeCooldowns.length > 1 ? 's' : ''} Frozen
                       </span>
-                      <div>
-                        <div className="text-base sm:text-xl font-black text-white">{pos.symbol}</div>
-                        <div className="text-[10px] sm:text-[11px] text-slate-400">Opened: {formatIndianDateTime(pos.created_at)}</div>
-                      </div>
-                    </div>
-
-                    {/* Live Unrealized PnL */}
-                    <div className="text-right">
-                      <div className="text-[10px] sm:text-xs text-slate-400 font-semibold">Unrealized P&L</div>
-                      <div className={`text-lg sm:text-2xl font-black ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isProfit ? '+' : ''}{formatUSD(pnl)}
-                        <span className="text-xs sm:text-sm ml-1 font-bold">({roi}%)</span>
-                      </div>
-                      <div className="text-[11px] sm:text-xs font-bold text-slate-300">
-                        {isProfit ? '+' : ''}{formatINR(pnl, inrRate)}
-                      </div>
-                    </div>
+                    )}
                   </div>
 
-                  {/* Telemetry Metrics Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
-                      <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Entry Price</div>
-                      <div className="text-white font-bold">{formatUSD(entry)}</div>
-                      <div className="text-[10px] text-slate-400">{formatINR(entry, inrRate)}</div>
-                    </div>
-
-                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
-                      <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Mark Price</div>
-                      <div className="text-cyan-400 font-bold">{formatUSD(livePrice)}</div>
-                      <div className="text-[10px] text-slate-400">{formatINR(livePrice, inrRate)}</div>
-                    </div>
-
-                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
-                      <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Triple Barrier Levels</div>
-                      <div className="text-emerald-400 font-bold text-[11px]">
-                        TP: {pos.take_profit_price ? formatUSD(pos.take_profit_price) : '+3.2x ATR'}
-                      </div>
-                      <div className="text-rose-400 text-[10px] font-bold">
-                        SL: {pos.stop_loss_price ? formatUSD(pos.stop_loss_price) : '-1.8x ATR'}
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
-                      <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Position Sizing</div>
-                      <div className="text-white font-bold">{amount.toFixed(2)} {pos.symbol.replace('USDT', '')}</div>
-                      <div className="text-[10px] text-slate-400">{formatUSD(amount * entry)} Notional</div>
-                    </div>
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-semibold text-slate-300">
+                    <Gauge className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="text-slate-400 text-[11px]">Daily DD:</span>
+                    <span className={`font-bold text-[11px] ${riskGov.dailyDrawdownPct > 3 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                      {(riskGov.dailyDrawdownPct || 0).toFixed(2)}%
+                    </span>
+                    <span className="text-slate-500 text-[10px]">/ 5.0% Kill</span>
                   </div>
 
-                  {/* Audit Button */}
-                  <button
-                    onClick={() => setSelectedTrade(pos)}
-                    className="mt-3 w-full py-2 px-3 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-xl text-cyan-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>View Live Groq CRO Reasoning & Confluence</span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          /* When no active position, show Live Scanner & Radar Card */
-          <div className="bg-slate-900/50 border border-slate-800/80 rounded-3xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
-                  <h3 className="font-black text-sm sm:text-base md:text-lg text-white">Live Market Scanner & Regime Radar</h3>
-                </div>
-                <p className="text-[11px] sm:text-xs text-slate-400">
-                  Targeting liquid Bitget futures (&gt;$5M vol) with 15m structural trend + 5m pullback rejection.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/50 text-cyan-400 text-xs font-bold truncate">
-                  Target: {focusedCoin}
-                </span>
-                <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-xs font-bold">
-                  {formatUSD(liveInd.price || 0)}
-                </span>
-              </div>
-            </div>
-
-            {/* Indicator Radar Gauges */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-4">
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">15M REGIME</div>
-                <div className="text-sm sm:text-base font-black mt-1 text-emerald-400 truncate">
-                  {liveInd.regime || 'EXPANSION'}
-                </div>
-                <div className="text-[10px] text-slate-500">Macro Structure</div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">RSI (14)</div>
-                <div className={`text-sm sm:text-base font-black mt-1 ${liveInd.rsi > 65 ? 'text-rose-400' : liveInd.rsi < 35 ? 'text-emerald-400' : 'text-cyan-400'}`}>
-                  {liveInd.rsi?.toFixed(1) || '50.0'}
-                </div>
-                <div className="text-[10px] text-slate-500">{liveInd.rsi > 65 ? 'Overbought' : liveInd.rsi < 35 ? 'Oversold' : 'Neutral Zone'}</div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">ADX TREND</div>
-                <div className={`text-sm sm:text-base font-black mt-1 ${liveInd.adx > 25 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {liveInd.adx?.toFixed(1) || '22.0'}
-                </div>
-                <div className="text-[10px] text-slate-500">{liveInd.adx > 25 ? 'Strong Trend' : 'Ranging Flow'}</div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">CHOP INDEX</div>
-                <div className={`text-sm sm:text-base font-black mt-1 ${liveInd.chop > 61.8 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                  {liveInd.chop?.toFixed(1) || '44.0'}
-                </div>
-                <div className="text-[10px] text-slate-500">{liveInd.chop > 61.8 ? 'Choppy Range' : 'Directional Clean'}</div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">LIQUIDITY FLOOR</div>
-                <div className="text-sm sm:text-base font-black text-white mt-1">
-                  &gt; $5M
-                </div>
-                <div className="text-[10px] text-emerald-400 font-bold">Max Spread 0.15%</div>
-              </div>
-
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">ATR VOLATILITY</div>
-                <div className="text-sm sm:text-base font-black text-white mt-1">
-                  {formatUSD(liveInd.atr || 0)}
-                </div>
-                <div className="text-[10px] text-slate-400">{formatINR(liveInd.atr || 0, inrRate)}</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ─── TAB: OVERVIEW (Charts & Performance) ──────────────────────────────── */}
-        {(activePage === 'overview' || activePage === 'scanner') && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">
-            {/* Equity Curve Chart */}
-            <div className="lg:col-span-2 bg-slate-900/60 border border-slate-850 rounded-3xl p-4 sm:p-6 shadow-xl">
-              <div className="flex items-center justify-between mb-3 sm:mb-4">
-                <div>
-                  <h3 className="font-black text-white text-sm sm:text-base md:text-lg flex items-center gap-1.5">
-                    <TrendingUp className="w-4 h-4 text-cyan-400" />
-                    <span>Cumulative P&L Curve</span>
-                  </h3>
-                  <p className="text-[11px] sm:text-xs text-slate-400">Compounding performance in USD & INR</p>
-                </div>
-                <div className="text-right">
-                  <div className={`font-black text-sm sm:text-base md:text-lg ${displayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {displayPnl >= 0 ? '+' : ''}{formatUSD(displayPnl)}
-                  </div>
-                  <div className="text-[10px] sm:text-xs font-bold text-slate-400">
-                    {displayPnl >= 0 ? '+' : ''}{formatINR(displayPnl, inrRate)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="h-48 sm:h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={equityCurveData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickLine={false} />
-                    <YAxis stroke="#64748b" fontSize={10} tickLine={false} tickFormatter={(v) => `$${v}`} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#090d16',
-                        borderColor: '#1e293b',
-                        borderRadius: '12px',
-                        fontSize: '11px',
-                        color: '#fff',
-                      }}
-                      formatter={(value: any) => [
-                        `${formatUSD(value)} (${formatINR(value, inrRate)})`,
-                        'Realized P&L',
-                      ]}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="pnl"
-                      stroke="#22d3ee"
-                      strokeWidth={2.5}
-                      dot={{ r: 3, fill: '#22d3ee', stroke: '#0f172a', strokeWidth: 2 }}
-                      activeDot={{ r: 5, fill: '#38bdf8' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Quantitative Risk Breakdown */}
-            <div className="bg-slate-900/60 border border-slate-850 rounded-3xl p-4 sm:p-6 shadow-xl flex flex-col justify-between">
-              <div>
-                <h3 className="font-black text-white text-sm sm:text-base md:text-lg flex items-center gap-1.5 mb-1">
-                  <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                  <span>v3.0 Quant Risk Guard</span>
-                </h3>
-                <p className="text-[11px] sm:text-xs text-slate-400 mb-3 sm:mb-4">Risk parameters & execution guardrails</p>
-
-                <div className="space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
-                    <span className="text-slate-400 text-[11px]">Consecutive Loss Freeze</span>
-                    <span className="font-black text-amber-300 text-xs">4h Cooldown (2 losses)</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
-                    <span className="text-slate-400 text-[11px]">Average Win</span>
-                    <div className="text-right">
-                      <span className="font-black text-emerald-400 text-xs">+{formatUSD(avgWin)}</span>
-                      <div className="text-[9px] text-slate-400">+{formatINR(avgWin, inrRate)}</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
-                    <span className="text-slate-400 text-[11px]">Average Loss</span>
-                    <div className="text-right">
-                      <span className="font-black text-rose-400 text-xs">-{formatUSD(avgLoss)}</span>
-                      <div className="text-[9px] text-slate-400">-{formatINR(avgLoss, inrRate)}</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
-                    <span className="text-slate-400 text-[11px]">Fee-Aware Breakeven</span>
-                    <span className="font-bold text-cyan-400 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40 text-[10px]">
-                      +1.2x ATR Level
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 font-semibold text-slate-300">
+                    <Scale className="w-3.5 h-3.5 text-purple-400" />
+                    <span className="text-slate-400 text-[11px]">CRO Approval:</span>
+                    <span className="text-purple-300 font-bold text-[11px]">
+                      {(riskGov.llmApprovalRate || 0).toFixed(1)}%
                     </span>
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-950/40 border border-cyan-800/40 font-bold text-cyan-300">
+                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>3x Leverage · 1.8x / 3.2x ATR Stop</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="mt-3 pt-2.5 border-t border-slate-850 text-[10px] text-slate-500 text-center">
-                Focus Engine v3.0 Quantitative Session Active
+              {activeCooldowns.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-slate-850 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-amber-300 font-bold">Cooldown Active:</span>
+                  {activeCooldowns.map((cd) => (
+                    <span key={cd.symbol} className="px-2 py-0.5 rounded bg-amber-950/60 border border-amber-500/40 text-amber-200 font-mono font-semibold">
+                      {cd.symbol} ({cd.cooldownRemainingMin}m left · {cd.consecutiveLosses} losses)
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Telemetry Ticker Bar & Swipeable Chip Strip */}
+            <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-3 sm:p-3.5 shadow-lg space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                    <Eye className="w-4 h-4 animate-pulse" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1">
+                      <span>Current Target</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    </div>
+                    <div className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5 truncate">
+                      <span className="truncate">{focusedCoin}</span>
+                      <span className="text-[10px] text-cyan-400 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40 font-mono font-bold shrink-0">
+                        Cycle #{cycleCount}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <div className="text-[10px] text-slate-500 uppercase font-semibold">15m Regime</div>
+                  <div className="text-xs font-black text-emerald-400 uppercase">
+                    {liveInd.regime || 'EXPANSION'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Swipeable Indicator Chips Strip */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 text-xs select-none">
+                <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
+                  <span className="text-slate-500">RSI:</span>
+                  <span className={liveInd.rsi > 65 ? 'text-rose-400' : liveInd.rsi < 35 ? 'text-emerald-400' : 'text-cyan-400'}>
+                    {liveInd.rsi?.toFixed(1) || '50.0'}
+                  </span>
+                </div>
+
+                <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
+                  <span className="text-slate-500">ADX:</span>
+                  <span className={liveInd.adx > 25 ? 'text-emerald-400' : 'text-amber-400'}>
+                    {liveInd.adx?.toFixed(1) || '22.0'}
+                  </span>
+                </div>
+
+                <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
+                  <span className="text-slate-500">CHOP:</span>
+                  <span className={liveInd.chop > 61.8 ? 'text-rose-400' : 'text-emerald-400'}>
+                    {liveInd.chop?.toFixed(1) || '44.0'}
+                  </span>
+                </div>
+
+                <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
+                  <span className="text-slate-500">15m MTF:</span>
+                  <span className={liveInd.mtf?.includes('BULL') ? 'text-emerald-400' : liveInd.mtf?.includes('BEAR') ? 'text-rose-400' : 'text-slate-400'}>
+                    {liveInd.mtf || 'NEUTRAL'}
+                  </span>
+                </div>
+
+                <div className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-850 font-bold text-slate-300 flex items-center gap-1 shrink-0 text-[11px]">
+                  <span className="text-slate-500">ATR:</span>
+                  <span className="text-white">{formatUSD(liveInd.atr || 0)}</span>
+                </div>
+
+                <div className="px-2 py-1 rounded-lg bg-indigo-950/50 border border-indigo-500/30 font-bold text-indigo-300 shrink-0 text-[11px]">
+                  Gemini 3.6 CRO Active
+                </div>
+              </div>
+            </div>
+
+            {/* 4 Top Stat Cards (Dual Currency USD + INR) */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+              <div className="gemini-glass-card rounded-2xl p-3 sm:p-4 shadow-lg">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
+                  <span>WALLET BALANCE</span>
+                  <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
+                </div>
+                <div className="text-lg sm:text-2xl font-black text-white tracking-tight truncate">
+                  {formatUSD(displayBalance)}
+                </div>
+                <div className="mt-1 flex items-center gap-1">
+                  <span className="text-[10px] sm:text-xs font-extrabold text-emerald-400 bg-emerald-950/60 px-1.5 sm:px-2 py-0.5 rounded border border-emerald-800/40 truncate">
+                    {formatINR(displayBalance, inrRate)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="gemini-glass-card rounded-2xl p-3 sm:p-4 shadow-lg">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
+                  <span>NET REALIZED PNL</span>
+                  <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
+                </div>
+                <div className={`text-lg sm:text-2xl font-black tracking-tight truncate ${displayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {displayPnl >= 0 ? '+' : ''}{formatUSD(displayPnl)}
+                </div>
+                <div className="mt-1 flex items-center gap-1">
+                  <span className={`text-[10px] sm:text-xs font-extrabold px-1.5 sm:px-2 py-0.5 rounded border truncate ${displayPnl >= 0 ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800/40' : 'text-rose-400 bg-rose-950/60 border-rose-800/40'}`}>
+                    {displayPnl >= 0 ? '+' : ''}{formatINR(displayPnl, inrRate)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="gemini-glass-card rounded-2xl p-3 sm:p-4 shadow-lg">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
+                  <span>WIN RATE</span>
+                  <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400" />
+                </div>
+                <div className="text-lg sm:text-2xl font-black text-white tracking-tight">
+                  {winRate}%
+                </div>
+                <div className="mt-1 text-[10px] sm:text-[11px] text-slate-400 font-medium truncate">
+                  <span className="text-emerald-400 font-bold">{winningTrades.length}W</span> · <span className="text-rose-400 font-bold">{losingTrades.length}L</span> · PF: <span className="text-white font-bold">{profitFactor}</span>
+                </div>
+              </div>
+
+              <div className="gemini-glass-card rounded-2xl p-3 sm:p-4 shadow-lg">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] sm:text-xs font-semibold mb-1 sm:mb-2">
+                  <span>ACTIVE POSITION</span>
+                  <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                </div>
+                <div className="text-lg sm:text-2xl font-black text-white tracking-tight">
+                  {openTrades.length} Open
+                </div>
+                <div className="mt-1 text-[10px] sm:text-[11px] text-slate-400 font-medium flex items-center gap-1 truncate">
+                  <span className="text-cyan-400 font-bold">3x Leverage</span>
+                  <span>· Triple Barrier</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Position Card (if trade open) */}
+            {openTrades.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
+                  <span>Live Active Futures Position</span>
+                </h2>
+                {openTrades.map((pos) => {
+                  const livePrice = livePrices[pos.symbol] || parseFloat(pos.entry_price as any);
+                  const entry = parseFloat(pos.entry_price as any);
+                  const amount = pos.amount;
+                  const pnl = pos.position_side === 'LONG' ? (livePrice - entry) * amount : (entry - livePrice) * amount;
+                  const roi = entry > 0 ? ((pnl / (entry * amount / 3)) * 100).toFixed(2) : '0.00';
+                  const isProfit = pnl >= 0;
+
+                  return (
+                    <div
+                      key={pos.id}
+                      className="bg-gradient-to-br from-slate-900 to-slate-950 border-2 border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl relative overflow-hidden"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3 mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`px-2.5 py-1 rounded-xl text-xs font-black tracking-wider uppercase ${pos.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20' : 'bg-rose-500 text-white shadow-md shadow-rose-500/20'}`}>
+                            {pos.position_side} 3X
+                          </span>
+                          <div>
+                            <div className="text-base sm:text-xl font-black text-white">{pos.symbol}</div>
+                            <div className="text-[10px] sm:text-[11px] text-slate-400">Opened: {formatIndianDateTime(pos.created_at)}</div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[10px] sm:text-xs text-slate-400 font-semibold">Unrealized P&L</div>
+                          <div className={`text-lg sm:text-2xl font-black ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {isProfit ? '+' : ''}{formatUSD(pnl)}
+                            <span className="text-xs sm:text-sm ml-1 font-bold">({roi}%)</span>
+                          </div>
+                          <div className="text-[11px] sm:text-xs font-bold text-slate-300">
+                            {isProfit ? '+' : ''}{formatINR(pnl, inrRate)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Entry Price</div>
+                          <div className="text-white font-bold">{formatUSD(entry)}</div>
+                          <div className="text-[10px] text-slate-400">{formatINR(entry, inrRate)}</div>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Mark Price</div>
+                          <div className="text-cyan-400 font-bold">{formatUSD(livePrice)}</div>
+                          <div className="text-[10px] text-slate-400">{formatINR(livePrice, inrRate)}</div>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Triple Barrier Levels</div>
+                          <div className="text-emerald-400 font-bold text-[11px]">
+                            TP: {pos.take_profit_price ? formatUSD(pos.take_profit_price) : '+3.2x ATR'}
+                          </div>
+                          <div className="text-rose-400 text-[10px] font-bold">
+                            SL: {pos.stop_loss_price ? formatUSD(pos.stop_loss_price) : '-1.8x ATR'}
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Position Sizing</div>
+                          <div className="text-white font-bold">{amount.toFixed(2)} {pos.symbol.replace('USDT', '')}</div>
+                          <div className="text-[10px] text-slate-400">{formatUSD(amount * entry)} Notional</div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedTrade(pos)}
+                        className="mt-3 w-full py-2 px-3 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-xl text-cyan-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>View Live Gemini CRO Reasoning & Confluence</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Equity Curve & Risk Breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">
+              <div className="lg:col-span-2 gemini-glass-card rounded-3xl p-4 sm:p-6 shadow-xl">
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                  <div>
+                    <h3 className="font-black text-white text-sm sm:text-base md:text-lg flex items-center gap-1.5">
+                      <TrendingUp className="w-4 h-4 text-cyan-400" />
+                      <span>Cumulative P&L Curve</span>
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-slate-400">Compounding performance in USD & INR</p>
+                  </div>
+                  <div className="text-right">
+                    <div className={`font-black text-sm sm:text-base md:text-lg ${displayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {displayPnl >= 0 ? '+' : ''}{formatUSD(displayPnl)}
+                    </div>
+                    <div className="text-[10px] sm:text-xs font-bold text-slate-400">
+                      {displayPnl >= 0 ? '+' : ''}{formatINR(displayPnl, inrRate)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-48 sm:h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={equityCurveData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickLine={false} />
+                      <YAxis stroke="#64748b" fontSize={10} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#090d16',
+                          borderColor: '#1e293b',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          color: '#fff',
+                        }}
+                        formatter={(value: any) => [
+                          `${formatUSD(value)} (${formatINR(value, inrRate)})`,
+                          'Realized P&L',
+                        ]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="pnl"
+                        stroke="#22d3ee"
+                        strokeWidth={2.5}
+                        dot={{ r: 3, fill: '#22d3ee', stroke: '#0f172a', strokeWidth: 2 }}
+                        activeDot={{ r: 5, fill: '#38bdf8' }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Quant Risk Guard Box */}
+              <div className="gemini-glass-card rounded-3xl p-4 sm:p-6 shadow-xl flex flex-col justify-between">
+                <div>
+                  <h3 className="font-black text-white text-sm sm:text-base md:text-lg flex items-center gap-1.5 mb-1">
+                    <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                    <span>v3.1 Quant Risk Guard</span>
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-slate-400 mb-3 sm:mb-4">Risk parameters & execution guardrails</p>
+
+                  <div className="space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
+                      <span className="text-slate-400 text-[11px]">Consecutive Loss Freeze</span>
+                      <span className="font-black text-amber-300 text-xs">4h Cooldown (2 losses)</span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
+                      <span className="text-slate-400 text-[11px]">Average Win</span>
+                      <div className="text-right">
+                        <span className="font-black text-emerald-400 text-xs">+{formatUSD(avgWin)}</span>
+                        <div className="text-[9px] text-slate-400">+{formatINR(avgWin, inrRate)}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
+                      <span className="text-slate-400 text-[11px]">Average Loss</span>
+                      <div className="text-right">
+                        <span className="font-black text-rose-400 text-xs">-{formatUSD(avgLoss)}</span>
+                        <div className="text-[9px] text-slate-400">-{formatINR(avgLoss, inrRate)}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-850">
+                      <span className="text-slate-400 text-[11px]">Fee-Aware Breakeven</span>
+                      <span className="font-bold text-cyan-400 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40 text-[10px]">
+                        +1.2x ATR Level
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-slate-850 text-[10px] text-slate-500 text-center">
+                  Focus Engine v3.1 Quantitative Session Active
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Navigation Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div 
+                onClick={() => handleTabSwitch('brain')}
+                className="gemini-glass-card rounded-2xl p-4 cursor-pointer hover:border-cyan-400/50 transition-all flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">Adversarial CRO AI Stream</h4>
+                    <p className="text-[11px] text-slate-400">{focusLogs.length} live audits evaluated</p>
+                  </div>
+                </div>
+                <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+              </div>
+
+              <div 
+                onClick={() => handleTabSwitch('apikeys')}
+                className="gemini-glass-card rounded-2xl p-4 cursor-pointer hover:border-cyan-400/50 transition-all flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                    <Cpu className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">AI Key Cluster Diagnostics</h4>
+                    <p className="text-[11px] text-slate-400">6 Gemini Keys + Groq failover</p>
+                  </div>
+                </div>
+                <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
               </div>
             </div>
           </div>
         )}
 
-        {/* ─── TAB: BRAIN / ADVERSARIAL CRO AI DECISIONS ─────────────────────────── */}
-        {(activePage === 'overview' || activePage === 'brain') && (
-          <div className="bg-slate-900/60 border border-slate-850 rounded-3xl p-4 sm:p-6 shadow-xl">
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <div>
-                <h3 className="font-black text-white text-sm sm:text-base md:text-lg flex items-center gap-1.5">
-                  <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" />
-                  <span>Adversarial CRO AI Decision Stream</span>
-                </h3>
-                <p className="text-[11px] sm:text-xs text-slate-400">Rigorous 5-point disqualification gatekeeper auditing setups</p>
+        {/* ═════════════════════════════════════════════════════════════════════════
+            PAGE 2: LIVE SCANNER & 15M REGIME RADAR
+            ═════════════════════════════════════════════════════════════════════════ */}
+        {activePage === 'scanner' && (
+          <div className="space-y-3.5 sm:space-y-5 animate-fadeIn">
+            {/* Telemetry Ticker Bar */}
+            <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-3 sm:p-3.5 shadow-lg space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+                    <Eye className="w-4 h-4 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1">
+                      <span>Currently Auditing</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    </div>
+                    <div className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+                      <span>{focusedCoin}</span>
+                      <span className="text-[10px] text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800/40 font-mono">
+                        Cycle #{cycleCount}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold block">15M Macro Regime</span>
+                  <span className="text-sm font-black text-emerald-400 uppercase">
+                    {liveInd.regime || 'EXPANSION'}
+                  </span>
+                </div>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-950/60 border border-indigo-700/50 text-indigo-300 text-[10px] sm:text-xs font-bold shrink-0">
-                Live Audits
-              </span>
             </div>
 
-            <div className="space-y-2 max-h-80 sm:max-h-96 overflow-y-auto pr-1 custom-scrollbar">
-              {focusLogs.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs">
-                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-slate-600" />
-                  Auditing 15m structure and 5m pullbacks for {focusedCoin}... CRO decisions will appear here.
+            {/* Main Radar Gauges Card */}
+            <div className="gemini-glass-card rounded-3xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Eye className="w-5 h-5 text-cyan-400" />
+                    <h3 className="font-black text-base sm:text-lg text-white">Live Market Scanner & Regime Radar</h3>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Auditing liquid Bitget futures (&gt;$5M 24h vol) with 15m structural momentum + 5m pullback rejections.
+                  </p>
                 </div>
-              ) : (
-                focusLogs.slice(0, 30).map((log) => {
-                  const isAction = log.action === 'LONG' || log.action === 'SHORT';
-                  const isWarning = log.action === 'WARN' || log.action === 'VETO';
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-700/50 text-cyan-300 text-xs font-bold">
+                    Mark: {formatUSD(liveInd.price || 0)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Gauges Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-4">
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">15M REGIME</div>
+                  <div className="text-base font-black mt-1 text-emerald-400 truncate">
+                    {liveInd.regime || 'EXPANSION'}
+                  </div>
+                  <div className="text-[10px] text-slate-500">Macro Structure</div>
+                </div>
+
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">RSI (14)</div>
+                  <div className={`text-base font-black mt-1 ${liveInd.rsi > 65 ? 'text-rose-400' : liveInd.rsi < 35 ? 'text-emerald-400' : 'text-cyan-400'}`}>
+                    {liveInd.rsi?.toFixed(1) || '50.0'}
+                  </div>
+                  <div className="text-[10px] text-slate-500">{liveInd.rsi > 65 ? 'Overbought' : liveInd.rsi < 35 ? 'Oversold' : 'Neutral Pullback'}</div>
+                </div>
+
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">ADX TREND</div>
+                  <div className={`text-base font-black mt-1 ${liveInd.adx > 25 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {liveInd.adx?.toFixed(1) || '22.0'}
+                  </div>
+                  <div className="text-[10px] text-slate-500">{liveInd.adx > 25 ? 'Strong Trend' : 'Ranging Flow'}</div>
+                </div>
+
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">CHOP INDEX</div>
+                  <div className={`text-base font-black mt-1 ${liveInd.chop > 61.8 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {liveInd.chop?.toFixed(1) || '44.0'}
+                  </div>
+                  <div className="text-[10px] text-slate-500">{liveInd.chop > 61.8 ? 'Choppy Range' : 'Directional Clean'}</div>
+                </div>
+
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">LIQUIDITY FLOOR</div>
+                  <div className="text-base font-black text-white mt-1">
+                    &gt; $5M
+                  </div>
+                  <div className="text-[10px] text-emerald-400 font-bold">Max Spread 0.15%</div>
+                </div>
+
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">ATR VOLATILITY</div>
+                  <div className="text-base font-black text-white mt-1">
+                    {formatUSD(liveInd.atr || 0)}
+                  </div>
+                  <div className="text-[10px] text-slate-400">{formatINR(liveInd.atr || 0, inrRate)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Execution Strategy Rules Card */}
+            <div className="gemini-glass-card rounded-3xl p-4 sm:p-6 shadow-xl space-y-3">
+              <h4 className="font-black text-sm text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-cyan-400" />
+                <span>v3.1 Execution Cadence & Filtering Criteria</span>
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-850">
+                  <span className="font-bold text-cyan-300 block mb-1">1. 3-Minute Fast Rotation</span>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Scanner cycles across the top liquid basket every 3 minutes, generating ~3–4 quality opportunities per 15m.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-850">
+                  <span className="font-bold text-indigo-300 block mb-1">2. Pullback Sweet Spot</span>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Long entries require RSI $\le 48.0$ pullback. Short entries require RSI $\ge 52.0$ bounce in structural trend.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-850">
+                  <span className="font-bold text-emerald-300 block mb-1">3. Adversarial CRO Veto</span>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Google Gemini 3.6 Flash independently validates risk boundaries, disqualifying false breakouts.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═════════════════════════════════════════════════════════════════════════
+            PAGE 3: ACTIVE POSITIONS & POSITION GUARDIAN
+            ═════════════════════════════════════════════════════════════════════════ */}
+        {activePage === 'trades' && (
+          <div className="space-y-3.5 sm:space-y-5 animate-fadeIn">
+            {openTrades.length > 0 ? (
+              <div className="space-y-3">
+                <h2 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
+                  <span>Live Active Futures Position ({openTrades.length})</span>
+                </h2>
+                {openTrades.map((pos) => {
+                  const livePrice = livePrices[pos.symbol] || parseFloat(pos.entry_price as any);
+                  const entry = parseFloat(pos.entry_price as any);
+                  const amount = pos.amount;
+                  const pnl = pos.position_side === 'LONG' ? (livePrice - entry) * amount : (entry - livePrice) * amount;
+                  const roi = entry > 0 ? ((pnl / (entry * amount / 3)) * 100).toFixed(2) : '0.00';
+                  const isProfit = pnl >= 0;
+
                   return (
                     <div
-                      key={log.id}
-                      className={`p-2.5 sm:p-3 rounded-xl border text-xs transition-all ${
-                        isAction
-                          ? 'bg-slate-900 border-cyan-500/40'
-                          : isWarning
-                          ? 'bg-slate-950/80 border-amber-500/30'
-                          : 'bg-slate-950/50 border-slate-850'
-                      }`}
+                      key={pos.id}
+                      className="bg-gradient-to-br from-slate-900 to-slate-950 border-2 border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl relative overflow-hidden"
                     >
-                      <div className="flex items-center justify-between gap-1.5 mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-black uppercase ${
-                            log.action === 'LONG'
-                              ? 'bg-emerald-500 text-slate-950'
-                              : log.action === 'SHORT'
-                              ? 'bg-rose-500 text-white'
-                              : isWarning
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-slate-800 text-slate-300'
-                          }`}>
-                            {log.action || 'SIGNAL'}
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3 mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`px-2.5 py-1 rounded-xl text-xs font-black tracking-wider uppercase ${pos.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20' : 'bg-rose-500 text-white shadow-md shadow-rose-500/20'}`}>
+                            {pos.position_side} 3X
                           </span>
-                          <span className="font-extrabold text-white text-xs">{log.symbol}</span>
-                          {log.tier && (
-                            <span className="text-[9px] text-slate-400 bg-slate-900 px-1 py-0.2 rounded border border-slate-800">
-                              Tier {log.tier}
-                            </span>
-                          )}
+                          <div>
+                            <div className="text-base sm:text-xl font-black text-white">{pos.symbol}</div>
+                            <div className="text-[10px] sm:text-[11px] text-slate-400">Opened: {formatIndianDateTime(pos.created_at)}</div>
+                          </div>
                         </div>
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          {formatIndianDateTime(log.created_at)}
-                        </span>
+
+                        <div className="text-right">
+                          <div className="text-[10px] sm:text-xs text-slate-400 font-semibold">Unrealized P&L</div>
+                          <div className={`text-lg sm:text-2xl font-black ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {isProfit ? '+' : ''}{formatUSD(pnl)}
+                            <span className="text-xs sm:text-sm ml-1 font-bold">({roi}%)</span>
+                          </div>
+                          <div className="text-[11px] sm:text-xs font-bold text-slate-300">
+                            {isProfit ? '+' : ''}{formatINR(pnl, inrRate)}
+                          </div>
+                        </div>
                       </div>
 
-                      <p className="text-slate-300 text-[11px] leading-relaxed">
-                        {log.message}
-                      </p>
-
-                      {log.llm_source && (
-                        <div className="mt-1 text-[9px] sm:text-[10px] text-indigo-400 font-medium flex items-center gap-1">
-                          <Cpu className="w-3 h-3" />
-                          <span>{log.llm_source}</span>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Entry Price</div>
+                          <div className="text-white font-bold">{formatUSD(entry)}</div>
+                          <div className="text-[10px] text-slate-400">{formatINR(entry, inrRate)}</div>
                         </div>
-                      )}
+
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Mark Price</div>
+                          <div className="text-cyan-400 font-bold">{formatUSD(livePrice)}</div>
+                          <div className="text-[10px] text-slate-400">{formatINR(livePrice, inrRate)}</div>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Triple Barrier Levels</div>
+                          <div className="text-emerald-400 font-bold text-[11px]">
+                            TP: {pos.take_profit_price ? formatUSD(pos.take_profit_price) : '+3.2x ATR'}
+                          </div>
+                          <div className="text-rose-400 text-[10px] font-bold">
+                            SL: {pos.stop_loss_price ? formatUSD(pos.stop_loss_price) : '-1.8x ATR'}
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-850">
+                          <div className="text-slate-500 text-[10px] font-semibold mb-0.5">Position Sizing</div>
+                          <div className="text-white font-bold">{amount.toFixed(2)} {pos.symbol.replace('USDT', '')}</div>
+                          <div className="text-[10px] text-slate-400">{formatUSD(amount * entry)} Notional</div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedTrade(pos)}
+                        className="mt-3 w-full py-2 px-3 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-xl text-cyan-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>View Live Gemini CRO Reasoning & Confluence</span>
+                      </button>
                     </div>
                   );
-                })
+                })}
+              </div>
+            ) : (
+              <div className="gemini-glass-card rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-xl">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mx-auto">
+                  <Shield className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white">Position Guardian Active · Standby Mode</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                    0 positions currently open. The engine is cycling candidate pairs every 3 minutes looking for high-conviction 15m structural setups with Gemini CRO validation.
+                  </p>
+                </div>
+
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-850 text-xs font-mono text-cyan-300">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Target: {focusedCoin} · 3x Leverage Ready</span>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Ledger Preview */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-black text-white text-sm flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-cyan-400" />
+                  <span>Recent Executed Positions</span>
+                </h3>
+                <button
+                  onClick={() => handleTabSwitch('ledger')}
+                  className="text-xs font-bold text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                >
+                  View Full Ledger ➔
+                </button>
+              </div>
+
+              {closedTrades.length === 0 ? (
+                <div className="py-6 text-center text-xs text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-850">
+                  No closed trades yet in active session.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {closedTrades.slice(0, 4).map((t) => {
+                    const pnl = parseFloat((t.realized_pnl as any) || '0');
+                    const isWin = pnl >= 0;
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => setSelectedTrade(t)}
+                        className="p-3 rounded-xl bg-slate-900/60 border border-slate-850 hover:border-cyan-500/50 cursor-pointer flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`px-1.5 py-0.2 rounded text-[10px] font-black ${t.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
+                            {t.position_side}
+                          </span>
+                          <span className="font-bold text-xs text-white">{t.symbol}</span>
+                        </div>
+                        <div className={`font-black text-xs ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isWin ? '+' : ''}{formatUSD(pnl)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
         )}
 
-        {/* ─── TAB: TRADE LEDGER / HISTORY ──────────────────────────────────────── */}
-        {(activePage === 'overview' || activePage === 'ledger' || activePage === 'trades') && (
-          <div className="bg-slate-900/60 border border-slate-850 rounded-3xl p-4 sm:p-6 shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 sm:mb-4">
+        {/* ═════════════════════════════════════════════════════════════════════════
+            PAGE 4: ADVERSARIAL CRO AI BRAIN
+            ═════════════════════════════════════════════════════════════════════════ */}
+        {activePage === 'brain' && (
+          <div className="space-y-3.5 sm:space-y-5 animate-fadeIn">
+            <div className="gemini-glass-card rounded-3xl p-4 sm:p-6 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-4 pb-3 border-b border-slate-800">
+                <div>
+                  <h3 className="font-black text-white text-base sm:text-lg flex items-center gap-2">
+                    <Bot className="w-5 h-5 text-indigo-400" />
+                    <span>Adversarial CRO AI Decision Stream</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Rigorous 5-point disqualification gatekeeper auditing setups (Google Gemini 3.6 Flash + Groq Standby)
+                  </p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-indigo-950/80 border border-indigo-700/50 text-indigo-300 text-xs font-bold self-start sm:self-auto">
+                  {focusLogs.length} Total Audits
+                </span>
+              </div>
+
+              <div className="space-y-2.5 max-h-[70vh] overflow-y-auto pr-1 custom-scrollbar">
+                {focusLogs.length === 0 ? (
+                  <div className="py-12 text-center text-slate-500 text-xs">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-slate-600" />
+                    Auditing 15m structure and 5m pullbacks for {focusedCoin}... CRO verdicts will stream live here.
+                  </div>
+                ) : (
+                  focusLogs.map((log) => {
+                    const isAction = log.action === 'LONG' || log.action === 'SHORT';
+                    const isWarning = log.action === 'WARN' || log.action === 'VETO';
+                    return (
+                      <div
+                        key={log.id}
+                        className={`p-3 sm:p-4 rounded-2xl border text-xs transition-all ${
+                          isAction
+                            ? 'bg-slate-900 border-cyan-500/50 shadow-lg shadow-cyan-950/40'
+                            : isWarning
+                            ? 'bg-slate-950/90 border-amber-500/40'
+                            : 'bg-slate-950/60 border-slate-850'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                              log.action === 'LONG'
+                                ? 'bg-emerald-500 text-slate-950'
+                                : log.action === 'SHORT'
+                                ? 'bg-rose-500 text-white'
+                                : isWarning
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}>
+                              {log.action || 'SIGNAL'}
+                            </span>
+                            <span className="font-extrabold text-white text-xs">{log.symbol}</span>
+                            {log.tier && (
+                              <span className="text-[9px] text-slate-400 bg-slate-900 px-1.5 py-0.2 rounded border border-slate-800 font-mono">
+                                Tier {log.tier}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-500 font-medium">
+                            {formatIndianDateTime(log.created_at)}
+                          </span>
+                        </div>
+
+                        <p className="text-slate-300 text-xs leading-relaxed">
+                          {log.message}
+                        </p>
+
+                        {log.llm_source && (
+                          <div className="mt-2 pt-1.5 border-t border-slate-850/80 text-[10px] text-cyan-400 font-medium flex items-center gap-1.5">
+                            <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>Audit Source: <strong className="text-white">{log.llm_source}</strong></span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═════════════════════════════════════════════════════════════════════════
+            PAGE 5: AI KEY CLUSTER & API HEALTH
+            ═════════════════════════════════════════════════════════════════════════ */}
+        {activePage === 'apikeys' && (
+          <div className="gemini-glass-card rounded-3xl p-4 sm:p-7 shadow-2xl animate-fadeIn">
+            <ApiKeyHealthPanel isEmbedded={true} />
+          </div>
+        )}
+
+        {/* ═════════════════════════════════════════════════════════════════════════
+            PAGE 6: TRADE LEDGER & AUDIT TRAIL
+            ═════════════════════════════════════════════════════════════════════════ */}
+        {activePage === 'ledger' && (
+          <div className="gemini-glass-card rounded-3xl p-4 sm:p-6 shadow-xl animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 sm:mb-4 pb-3 border-b border-slate-800">
               <div>
-                <h3 className="font-black text-white text-sm sm:text-base md:text-lg flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
+                <h3 className="font-black text-white text-base sm:text-lg flex items-center gap-1.5">
+                  <BookOpen className="w-5 h-5 text-cyan-400" />
                   <span>Trade Ledger</span>
                 </h3>
-                <p className="text-[11px] sm:text-xs text-slate-400">Past closed positions with dual currency and audit trail</p>
+                <p className="text-xs text-slate-400">Past closed positions with dual currency (USD + INR) and CRO audit trail</p>
               </div>
 
               {/* Direction Filters */}
@@ -890,7 +1163,7 @@ export function OverviewDashboard() {
                   <button
                     key={filter}
                     onClick={() => setSelectedFilter(filter)}
-                    className={`px-2.5 py-0.5 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                    className={`px-3 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                       selectedFilter === filter
                         ? 'bg-cyan-500 text-slate-950 shadow-sm'
                         : 'text-slate-400 hover:text-white'
@@ -903,11 +1176,11 @@ export function OverviewDashboard() {
             </div>
 
             {filteredClosedTrades.length === 0 ? (
-              <div className="py-10 text-center text-slate-500 text-xs bg-slate-950/40 rounded-2xl border border-slate-850/50 p-6">
+              <div className="py-12 text-center text-slate-500 text-xs bg-slate-950/40 rounded-2xl border border-slate-850/50 p-6">
                 <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-500/80 animate-bounce" />
-                <div className="text-white font-bold text-sm">v3.0 Clean Slate Active</div>
-                <p className="mt-1 text-slate-400 max-w-sm mx-auto">
-                  0 past trades in this active session. The engine is monitoring 15m structural setups with Adversarial CRO validation.
+                <div className="text-white font-bold text-sm">v3.1 Clean Slate Active</div>
+                <p className="mt-1 text-slate-400 max-w-sm mx-auto text-xs">
+                  0 past trades in this active session. The engine is monitoring 15m structural setups with Adversarial Gemini 3.6 CRO validation.
                 </p>
                 <div className="mt-3">
                   <button
@@ -933,11 +1206,11 @@ export function OverviewDashboard() {
                       <div
                         key={t.id}
                         onClick={() => setSelectedTrade(t)}
-                        className="bg-slate-950 p-3 sm:p-3.5 rounded-2xl border border-slate-850 hover:border-cyan-500/50 hover:bg-slate-900/60 space-y-2 cursor-pointer transition-all active:scale-[0.99] group shadow-sm"
+                        className="bg-slate-950 p-3.5 rounded-2xl border border-slate-850 hover:border-cyan-500/50 hover:bg-slate-900/60 space-y-2.5 cursor-pointer transition-all active:scale-[0.99] group shadow-sm"
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
-                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-black uppercase ${t.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${t.position_side === 'LONG' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'}`}>
                               {t.position_side}
                             </span>
                             <span className="font-extrabold text-white text-xs group-hover:text-cyan-300 transition-colors">{t.symbol}</span>
@@ -965,7 +1238,7 @@ export function OverviewDashboard() {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-[10px] pt-1 text-slate-500">
+                        <div className="flex items-center justify-between text-[10px] pt-1 text-slate-500 border-t border-slate-900/60">
                           <span className="bg-slate-900 px-1.5 py-0.2 rounded border border-slate-850 font-medium">
                             {t.exit_reason || 'CLOSED'}
                           </span>
@@ -1002,7 +1275,7 @@ export function OverviewDashboard() {
                             key={t.id}
                             onClick={() => setSelectedTrade(t)}
                             className="hover:bg-slate-800/40 cursor-pointer transition-colors group"
-                            title="Click to view full Groq CRO AI Decision and confluence audit"
+                            title="Click to view full Gemini CRO AI Decision and confluence audit"
                           >
                             <td className="py-2.5">
                               <div className="flex items-center gap-2">
@@ -1055,13 +1328,6 @@ export function OverviewDashboard() {
           </div>
         )}
 
-        {/* ─── TAB: AI KEY CLUSTER & API HEALTH ──────────────────────────────────── */}
-        {activePage === 'apikeys' && (
-          <div className="gemini-glass-card rounded-3xl p-4 sm:p-7 shadow-2xl animate-fadeIn">
-            <ApiKeyHealthPanel isEmbedded={true} />
-          </div>
-        )}
-
         {/* ─── MODALS ───────────────────────────────────────────────────────────── */}
         <TradeDetailModal
           trade={selectedTrade}
@@ -1102,10 +1368,7 @@ export function OverviewDashboard() {
             return (
               <button
                 key={item.id}
-                onClick={() => {
-                  setActivePage(item.id as DashboardPage);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleTabSwitch(item.id as DashboardPage)}
                 className={`bottom-nav-item touch-target cursor-pointer ${isActive ? 'active text-cyan-400' : 'text-slate-500'}`}
               >
                 <div className="relative">

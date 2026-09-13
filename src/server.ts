@@ -10,7 +10,7 @@ import path from 'path';
 import { CONFIG } from './config';
 import { getGroqUsageSummary } from './groq-client';
 import { getGeminiTelemetry, pingAllGeminiKeys } from './gemini-client';
-import { fetchWalletBalance, fetchOpenFuturesTrades } from './supabase-logger';
+import { fetchWalletBalance, fetchOpenFuturesTrades, getLatestInMemoryStatus } from './supabase-logger';
 import { riskGovernor } from './risk-governor';
 
 let currentFocusedCoin = 'None';
@@ -96,14 +96,15 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
         const openTrades = await fetchOpenFuturesTrades().catch(() => []);
         const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
 
+        const memStatus = getLatestInMemoryStatus();
         const health = {
           status: 'HEALTHY',
           service: 'focus-trading-engine',
           version: CONFIG.VERSION,
           mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.1)' : 'LIVE (v3.1)',
           uptime_seconds: uptimeSeconds,
-          cycle_count: engineCycleCount,
-          focused_coin: currentFocusedCoin,
+          cycle_count: engineCycleCount || memStatus.cycle_count || 1,
+          focused_coin: (currentFocusedCoin && currentFocusedCoin !== 'None') ? currentFocusedCoin : (memStatus.focused_symbol || 'Scanning...'),
           wallet_balance: wallet,
           wallet_balance_inr: Math.round(wallet * 88.5 * 100) / 100,
           inr_rate: 88.50,
@@ -114,6 +115,7 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
             entry: t.entry_price,
             size: t.amount,
           })),
+          live_indicators: memStatus.live_indicators || {},
           risk_governor: riskGovernor.getStatus(),
           gemini_cluster: getGeminiTelemetry(),
           groq_cloud_llm: getGroqUsageSummary(),

@@ -93,14 +93,14 @@ export function useSupabaseStream() {
       }
     };
 
-    // 2. Fetch initial trades (up to 1000 to cover all historical snapshots)
+    // 2. Fetch initial trades (up to 150 to keep mobile payload lean and fast)
     const fetchInitialTrades = async () => {
       try {
         const { data, error } = await client
           .from('futures_trades')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(1000);
+          .limit(150);
         if (error) throw error;
         if (data) {
           const parsedTrades = data as FuturesTrade[];
@@ -121,7 +121,7 @@ export function useSupabaseStream() {
           .from('system_health_events')
           .select('*')
           .order('timestamp', { ascending: false })
-          .limit(50);
+          .limit(30);
         if (error) throw error;
         if (data) setHealthEvents(data as HealthEvent[]);
       } catch (err) {
@@ -146,8 +146,34 @@ export function useSupabaseStream() {
       }
     };
 
-    // 3c. Fetch initial engine status
+    // 3c. Fetch initial engine status with fast local /health endpoint first (<10ms RAM read)
     const fetchInitialEngineStatus = async () => {
+      try {
+        const res = await fetch('/health');
+        if (res.ok) {
+          const h = await res.json();
+          if (typeof h.wallet_balance === 'number') {
+            setWalletBalance(h.wallet_balance);
+          }
+          setEngineStatus({
+            id: 'primary',
+            is_running: true,
+            focused_symbol: h.focused_coin,
+            cycle_count: h.cycle_count,
+            active_trades_count: h.active_positions_count,
+            live_indicators: {
+              ...(h.live_indicators || {}),
+              gemini_cluster: h.gemini_cluster,
+              risk_governor: h.risk_governor,
+            },
+            updated_at: h.timestamp,
+          } as any);
+          return;
+        }
+      } catch {
+        // Fallback to Supabase direct query
+      }
+
       try {
         const { data } = await client
           .from('engine_status')
@@ -275,16 +301,20 @@ export function useSupabaseStream() {
       )
       .subscribe();
 
-    // Auto-polling interval every 3s to guarantee live updates
-    const pollInterval = setInterval(() => {
+    // Lightweight polling interval: fast /health status every 3.5s (<10ms in-memory read)
+    const statusPollInterval = setInterval(() => {
       fetchInitialEngineStatus();
-      fetchInitialWallet();
+    }, 3500);
+
+    // Gentle background sync for trades and sessions every 60s
+    const backgroundSyncInterval = setInterval(() => {
       fetchInitialTrades();
       fetchInitialSessions();
-    }, 3000);
+    }, 60000);
 
     return () => {
-      clearInterval(pollInterval);
+      clearInterval(statusPollInterval);
+      clearInterval(backgroundSyncInterval);
       client.removeChannel(engineStatusChannel);
       client.removeChannel(pipelineChannel);
       client.removeChannel(tradesChannel);

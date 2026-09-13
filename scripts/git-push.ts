@@ -13,7 +13,7 @@ const remoteUrl = `https://${token}@github.com/Hardik-1209/focus-trading-engine.
 console.log('[Git] Adding modified and new files...');
 execSync('git add -A', { stdio: 'inherit' });
 
-const commitMsg = 'feat(v3.1): Dual-Engine LLM Architecture (Gemini 3.6 Flash primary 6-key array + Groq failover), ~3-4 trades/15m frequency, futuristic Gemini glassmorphism UI, and AI Key Cluster diagnostics';
+const commitMsg = 'fix(ui-perf): Fix mobile tab switching, eliminate 3s 1000-trade network lag, and deliver instant dedicated page views';
 try {
   execSync(`git commit -m "${commitMsg}"`, { stdio: 'inherit' });
 } catch {
