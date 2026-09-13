@@ -1,0 +1,346 @@
+﻿FOCUS TRADING ENGINE v2.0Deep Audit, 2025–2026 Research Review & Redesign
+Crypto intraday trading • Bitget USDT perpetuals • Evidence-first recommendations
+1. Executive finding
+The bot is not failing because it lacks an LLM. The 24-hour audit shows a negative gross trading edge, severe turnover/fee drag, stops that are too tight for the traded instruments, repeated re-entry into the same volatile symbols, and an LLM approval layer that is not selective. The correct objective is therefore not “increase AI accuracy” first; it is to rebuild the pipeline so that a forecast is converted into a trade only when expected edge exceeds all-in trading friction with a meaningful margin.
+The report records 202 simulated closed positions, a 37.62% win rate, -1.5015 USDT net realized PnL, 1.2119 USDT fees, -0.2896 USDT gross trading PnL, and 0.78 profit factor. Average hold duration was 1.1 minutes. The report attributes 80.7% of total loss to fees and identifies LSKUSDT and CVCUSDT as responsible for 93.7% of net losses. [PDF pp.1–2]
+My central conclusion: do not add a larger neural network or more LLM calls yet. First make the system economically selective, regime-aware, cost-aware, and statistically testable. Recent 2026 research reaches a similar conclusion: ML forecasts can look useful but become unprofitable after realistic transaction costs unless the system trades only when forecast magnitude clears a cost threshold. [Research 2]
+2. Complete audit of the existing bot
+2.1 Current architecture reconstructed from the PDF
+The system scans Bitget USDT perpetuals every 30 minutes, ranks contracts with a volatility score based on absolute 24-hour price move multiplied by log10(volume), selects the highest-volatility coin, and avoids selecting the same symbol in consecutive cycles. It then bootstraps 60 one-minute and 40 five-minute candles, maintains a live WebSocket feed, calculates EMA 9/21/50, RSI 14, ADX 14, CHOP, VWAP, MACD, ATR and volume z-score, and applies a three-tier signal hierarchy. Tier 1 is a pullback setup, Tier 2 is momentum breakout, and Tier 3 is a choppy/consolidating WAIT state. [PDF p.2]
+Every trade in the reported window was Tier 2 and passed the Groq LLM. The LLM layer used a seven-key Groq array and openai/gpt-oss-20b or Llama models for a four-block audit covering technical, narrative, macro and general risk. The position guardian monitors ticks and exits using a 4% leveraged hard stop, 6% leveraged take profit, breakeven after 1 ATR, 2x ATR trailing, 6-hour max hold and 1.5-hour stale exit. [PDF p.2]
+2.2 What the 24-hour result actually says
+Metric
+Observed
+Interpretation
+Trades
+202
+Far too high for a $10 virtual account with 1-minute momentum
+Win rate
+37.62%
+Not automatically fatal, but paired with current payoff it is insufficient
+Gross PnL
+-0.2896 USDT
+The strategy itself is already negative before fees
+Fees
+1.2119 USDT
+Dominant economic drag; 80.7% of total loss
+Profit factor
+0.78
+No evidence of positive gross edge
+Average win / loss
+$0.0702 / -$0.0543
+Payoff ratio 1.29; needs much higher hit rate or larger winners
+Average hold
+1.1 min
+Extremely short for the infrastructure and fee profile
+Hard-stop exits
+125 / 202 (61.9%)
+Entry/stop architecture is poorly matched to instrument noise
+LLM approvals
+202 / 202 (100%)
+LLM is not functioning as a filter
+LSK + CVC losses
+93.7% of total net losses
+Severe symbol concentration and re-entry churn
+The report itself identifies five structural failures: fee drag, stops inside the market-noise band, an uncritical LLM approval layer, repeated re-entry into the same coins, and a 1-minute breakout design that prevents the ATR/breakeven machinery from engaging. [PDF p.3]
+2.3 Additional deductions from the trade log
+The raw trade log reveals a deeper problem: several trades last 0–3 seconds even though the nominal strategy is described as 1-minute momentum. Examples include trades with 0s, 1s and 2s durations on LSK, VTHO, STEEM and CVC. This strongly suggests the live exit layer and/or execution simulation are interacting with intrabar price jumps in a way that makes the strategy effectively much faster than the candle timeframe implies. [PDF p.6] [PDF p.6]
+A second warning is that the reported “0.8% unleveraged hard stop” is not actually a fixed 0.8% loss on every trade: the trade log contains several realized return figures larger than the nominal threshold, including -8.9%, -13.4% and other large leveraged-return values. That suggests gaps, tick execution, market orders, price selection, or a mismatch between intended stop logic and simulated fill logic. This should be treated as an execution-model bug until proven otherwise, not merely as a tuning issue. [PDF p.5] [PDF p.7]
+3. Why the current bot is losing money
+Cause
+Evidence
+Priority
+Negative gross edge
+Gross PnL already -0.2896 USDT before fees
+Critical
+Excessive turnover
+202 trades / 24h; ~8.4 trades/hour
+Critical
+Fees overwhelm edge
+1.2119 USDT vs -0.2896 USDT gross
+Critical
+Stop too close to noise
+61.9% hard-stop exits
+Critical
+No selective gate
+100% LLM approval
+High
+Symbol churn
+LSK and CVC dominate losses
+High
+No robust regime gate
+Volatility ranking alone selects high-beta assets
+High
+Execution realism gap
+Very short holds and oversized realized stop breaches
+High
+Insufficient evidence window
+Only one 24-hour test is reported
+Critical for inference
+The most important distinction is between signal quality and economic tradability. A model can predict direction slightly better than chance and still lose money if turnover is too high, the forecast horizon is mismatched to execution, or the expected move is smaller than spread+fees+slippage. A recent May 2026 walk-forward study on BTC explicitly found that naive sign-based ML strategies failed under a 10-basis-point transaction-cost assumption and recovered in selected cases only after applying a cost-aware threshold on forecast magnitude. [Research 2]
+4. What current 2025–2026 research changes
+4.1 Model choice: simpler models remain hard to beat
+The strongest practical signal from current work is not “use the biggest model.” The 2026 BTC walk-forward comparison tested XGBoost, LSTM and iTransformer across 2018–2026 data and found XGBoost descriptively stronger than the neural alternatives, while emphasizing that cost-aware trade filtering mattered more than raw forecast direction. [Research 2]
+That fits your situation well. Your existing feature set is tabular, heterogeneous and relatively small: technical indicators, volume and multi-timeframe state. A calibrated LightGBM/XGBoost classifier or probabilistic regressor is therefore a much more realistic first predictive layer than a large transformer. Current FreqAI tooling also supports live adaptive retraining and LightGBM deployment, making this practical for an individual developer. [Research 11–12]
+4.2 Transformers and financial time-series foundation models
+Financial time-series foundation models are worth testing, but they should be treated as optional research modules rather than automatic replacements. Kronos, published at AAAI 2026, is a finance-specific foundation model trained on more than 12 billion K-line records from 45 exchanges and reports strong zero-shot benchmark performance on ranking and volatility tasks. [Research 4]
+However, other 2026 evidence is much more cautious: a study of foundation models in finance reports that off-the-shelf models can perform poorly in strict out-of-sample financial settings, while domain-specific pretraining is more promising. Another 2026 paper concludes that low signal-to-noise and structural breaks make finance fundamentally different from benchmark time series. [Research 13–14]
+Recommendation: benchmark Kronos or another TSFM as a secondary forecasting model on 5m–30m data, but do not deploy it as the sole trade decision-maker until it beats a cost-aware XGBoost baseline under walk-forward validation.
+4.3 LLMs: useful for narrative context, weak as tick-by-tick predictors
+Your Groq LLM is currently being asked to approve already-generated momentum signals. The 100% approval rate shows that the model is not creating useful separation among candidates. This is a design problem, not proof that LLMs are useless. LLMs are much better suited to unstructured information—news, event interpretation, protocol announcements, social narrative shifts—than to estimating a 5-minute expected return from OHLCV alone.
+An LLM should therefore become an asynchronous context/risk layer with a veto capability, not a mandatory approval step on every scalp. The quantitative model should first estimate expected return, downside, probability of hitting TP before SL, and expected cost. The LLM should only intervene when there is material text/event information or ambiguity.
+4.4 Reinforcement learning: promising, but not the first fix
+Recent work on risk-aware RL and futures-specific ensemble RL is interesting. FineFT (2025) reports risk reductions in a high-fidelity crypto-futures environment and emphasizes capability boundaries for regime changes. A separate 2025 study on PPO explicitly penalizes drawdown and turnover, but its out-of-sample benchmark still underperformed buy-and-hold on raw and risk-adjusted measures. [Research 5–6]
+That is exactly why RL should be a later-stage project for your bot. You do not yet have a validated state representation, cost model, or stable reward definition. Training an RL agent before fixing those would likely teach the system to exploit simulator artifacts rather than a real edge.
+5. Data and feature redesign
+5.1 Add features that explain tradability, not just direction
+Your current indicator set is reasonable but redundant: EMA, MACD and RSI all largely encode price trend/momentum. The missing information is market microstructure and cross-market context.
+Order-book imbalance at several depths, spread, depth, microprice and short-horizon order-flow imbalance.
+Trade aggressor imbalance, signed volume, trade intensity and liquidity shocks.
+Funding rate, funding change and funding dispersion across major venues.
+Open interest level and change, especially OI change conditional on price direction.
+Liquidations and liquidation clusters as event/risk features rather than direct buy/sell signals.
+BTC/ETH market state and beta of each altcoin to BTC/ETH; cross-sectional relative strength.
+Realized volatility, ATR percentile, intraday volatility regime and volatility-of-volatility.
+Exchange spread/depth and estimated impact for the actual planned order size.
+Optional news/social sentiment branch with timestamp alignment and strict no-future-data rules.
+2026 research on crypto market microstructure finds liquidity and price-discovery measures can carry predictive information, while 2026 work using BTC limit-order-book streams shows that LOB event data can improve short-horizon return forecasting beyond price series alone. [Research 7–8]
+5.2 Do not simply add thousands of features
+A 2025 crypto LOB study explicitly argues that better inputs and feature processing can matter more than adding another hidden layer. The practical implication is to build a compact set of interpretable, orthogonal features and measure incremental information gain, rather than feeding every indicator into a giant model. [Research 9]
+6. The correct decision framework: forecast -> edge -> gate -> execute
+Replace the current “signal then LLM approval” flow with a cost-aware selective decision system:
+Stage
+Output
+Trade only if
+1. Universe filter
+Liquid eligible symbols
+Minimum volume, tight spread, sufficient depth, no abnormal maintenance/event risk
+2. Regime classifier
+trend / range / high-volatility / stressed
+Strategy is compatible with current regime
+3. Opportunity detector
+candidate long/short events
+Structural setup present on 5m with 15m context
+4. Predictive model
+P(up), expected move, downside, uncertainty
+Calibrated probability and expected move exceed thresholds
+5. Cost model
+fees + spread + estimated slippage + impact
+Expected gross edge > all-in cost + safety margin
+6. Risk model
+stop distance, size, max loss
+Position size fits account risk budget
+7. Execution
+maker/market decision
+Fill probability and expected execution quality justify order type
+8. Post-trade learning
+attribution
+Update model statistics, not rules based on one trade
+A useful quantitative test is expected net value: EV = P(win)*AvgWin - P(loss)*AvgLoss - expected_cost. Under your current average win/loss and approximately 0.006 USDT average fee per trade, a rough breakeven win rate is about 48.4% if the win/loss magnitudes remain unchanged. This is only an illustration; changing the exit distribution changes the threshold materially.
+7. Stop-loss, take-profit and position sizing redesign
+Do not replace 0.8% with a single new fixed percentage. Stops must be structural and sized from volatility, then position size is derived from the chosen stop distance.
+Use a 5m structural stop: below/above swing structure, with an ATR floor so the stop is not inside normal noise.
+Use ATR multiples only as a guardrail, e.g. stop distance = max(structural distance, 1.5–2.5 ATR), then empirically optimize within a pre-registered grid.
+Risk a fixed fraction of equity per trade, e.g. 0.25–0.50% during research. Leverage becomes an implementation variable, not a return target.
+Prefer asymmetric exits: first reduce risk near +1R, then allow a runner when regime and trend strength support it.
+Use a volatility-adjusted time stop: if price does not make sufficient progress within N bars, exit; do not keep a stale position indefinitely.
+Hard global kill-switch: daily loss, rolling drawdown, exchange connectivity anomalies, spread explosion, or execution mismatch.
+Your PDF proposes 1.5–2.5 ATR and reduced leverage, which is directionally sensible, but this should be validated across multiple market regimes rather than adopted blindly. [PDF p.4]
+8. Churn controls and regime protection
+This is one of the highest-impact redesigns because the audit shows the same few coins repeatedly generating losses. The system needs a “do not trade” state as a first-class output.
+After two consecutive stop-outs on a symbol, block it for several hours and require a fresh regime transition before re-entry.
+After three consecutive portfolio losses, cut risk by 50%; after a predefined daily loss, stop opening new positions.
+Impose a minimum expected move / cost ratio, such as expected move at least 3x estimated round-trip friction for a market order. Test the threshold empirically.
+Ban new trades when spread, depth or slippage estimates exceed normal percentiles.
+Use a volatility percentile regime filter; high realized volatility is not automatically a signal to trade—sometimes it is a reason to trade smaller or not at all.
+Cap trades per symbol per rolling window and require a meaningful new setup state before re-entry.
+9. Execution model: the missing half of the strategy
+Bitget states its standard futures fee is currently 0.02% maker and 0.06% taker, before VIP/BGB discounts. That makes execution choice economically material for a high-turnover bot. [Research 10]
+Your current system effectively pays the taker rate repeatedly. Moving to maker orders can reduce friction, but “always use maker” is not the answer either: a non-filled order is an execution failure, and waiting for a fill can destroy the original signal. The execution engine should choose among marketable limit, passive post-only, and cancellation based on expected alpha decay, spread, queue/fill probability, and urgency.
+Backtesting must include both fee and slippage assumptions. VectorBT exposes explicit fees and slippage inputs, while Freqtrade’s current backtesting stack includes fee accounting and lookahead-analysis tooling. [Research 11]
+10. Validation protocol before real money
+A single 24-hour dry-run is diagnostic, not evidence of edge. The next validation phase should be designed before further tuning.
+Gate
+Requirement
+Data integrity
+Point-in-time timestamps, no future features, synchronized exchange data
+Historical backtest
+At least several market regimes and years of 5m/15m data for the chosen universe
+Walk-forward
+Rolling train/validation/test windows with no random shuffling
+Purging/embargo
+Required where labels overlap future horizons
+Cost realism
+Actual fee schedule + spread + slippage + partial fills + latency assumptions
+Selection discipline
+Pre-commit parameter grid; log every experiment
+Statistical test
+Probabilistic/Deflated Sharpe, bootstrap, and data-snooping-aware comparison
+Stress test
+Higher costs, delayed execution, volatility spikes, spread widening, missing ticks
+Paper/live shadow
+Several weeks minimum with exact production execution stack
+Capital ramp
+Start tiny; increase only after stability and risk gates pass
+Current research strongly supports this validation discipline. A 2026 crypto-factor study found naive backtesting inflated Sharpe by roughly 3.6x on average versus nested walk-forward selection with transaction costs and Deflated Sharpe, with many factors collapsing out of sample. [Research 13] A separate 2026 framework highlights the same family of controls: Deflated Sharpe, Probability of Backtest Overfitting, Superior Predictive Ability and minimum track-record concepts. [Research 14]
+For implementation, the open-source purgedcv project provides purged and combinatorial purged cross-validation, walk-forward splitting, embargoing and PSR/DSR calculations; Freqtrade also ships lookahead-analysis specifically to detect future-data contamination. [Research 12, 11]
+11. Recommended final architecture
+The target architecture should be modular and hierarchical rather than one “brain” making every decision.
+Module
+Recommended role
+Suggested technology
+Market data layer
+1m/5m OHLCV + trades + L2/L3 where affordable
+Bitget WS + normalized event store
+Feature layer
+Technical + microstructure + derivatives + cross-market
+Python/pandas/polars; compact feature registry
+Regime model
+Classify trend/range/stress/liquidity states
+LightGBM/XGBoost + HMM/volatility model as benchmark
+Opportunity model
+Estimate direction and expected move
+XGBoost/LightGBM baseline; calibrated probabilities
+Uncertainty model
+Reject ambiguous predictions
+Calibration, conformal/quantile approach, ensemble dispersion
+Cost/edge model
+Expected return net of fees/slippage/impact
+Explicit deterministic calculator + learned slippage model later
+Policy gate
+Trade / no-trade / reduce-size
+Rules + model thresholds; conservative by design
+Execution engine
+Post-only/limit/market decisions
+Exchange-native order management, fill monitoring
+Risk engine
+Position size, portfolio loss limits
+Fixed fractional risk + volatility scaling
+LLM/event layer
+Interpret news/events, produce narrative risk flags
+Small/cheap LLM asynchronously
+Monitoring
+Drift, model decay, execution mismatch
+Metrics, alerts, experiment registry
+Learning loop
+Retrain/recalibrate on schedule
+Walk-forward refresh; no automatic self-editing of rules
+This architecture deliberately separates prediction from action. The model can say “55% chance of a positive 30-minute move,” but the policy can still say “NO TRADE” because expected move is too small relative to spread, fees, slippage, and stop distance.
+12. Priority roadmap
+Priority 1 — critical problems to fix immediately
+Change
+Impact
+Difficulty
+Compute/Cost
+Reduce trade frequency by 70–90% through 5m/15m setup confirmation and stricter gates
+Very high
+Low–medium
+Minimal
+Replace fixed 0.8% stop with structural/ATR stop + risk-based sizing
+Very high
+Medium
+Minimal
+Implement symbol cooldown, consecutive-loss circuit breaker and daily kill switch
+Very high
+Low
+Minimal
+Make execution cost explicit and block trades with insufficient edge
+Very high
+Medium
+Minimal
+Audit stop/fill logic because realized returns exceed intended stop thresholds
+Very high
+Medium
+Minimal
+Priority 2 — high-impact improvements
+Change
+Impact
+Difficulty
+Compute/Cost
+Train calibrated XGBoost/LightGBM on 5m/15m features
+High
+Medium
+Low–medium
+Add spread, depth, OFI, trade-flow, funding, OI and volatility features
+High
+Medium
+Low–medium
+Regime classifier + adaptive thresholds
+High
+Medium
+Low–medium
+Replace binary buy/sell output with P(win), expected move and uncertainty
+High
+Medium
+Low
+Execution-aware limit/market order selection
+High
+Medium–high
+Low
+Add walk-forward/CPCV/DSR experiment registry
+High
+Medium
+Low
+Priority 3 — advanced AI/ML
+Approach
+Use
+Verdict
+Transformer on multi-asset 5m sequences
+Secondary forecaster
+Worth testing after baseline
+Kronos/TSFM
+Transfer learning / representation benchmark
+Research track, not first production model
+LOB transformer / TLOB-like model
+Very short-horizon microstructure
+Useful only if L2/L3 data quality is strong
+Ensemble of heterogeneous models
+Reduce model-specific failure
+Recommended after single-model baseline is stable
+RL policy layer
+Position management/execution optimization
+Later; high overfitting risk
+Priority 4 — experimental/cutting-edge
+Capability-aware ensemble RL for market-regime specialization.
+Event-driven multimodal model combining market data and time-aligned news/social embeddings.
+Continuous-time/Hawkes-style order-flow models for very short horizons.
+Online conformal prediction or uncertainty sets for dynamic trade abstention.
+LLM-driven research/strategy generation only behind a locked validation harness and experiment ledger.
+13. Top five improvements most likely to matter
+1. Stop trading marginal setups
+Add an explicit net-edge gate: no trade unless predicted move comfortably exceeds fees + spread + slippage + a risk buffer. This is the single biggest conceptual upgrade.
+2. Kill churn and concentration
+Cooldowns, loss breakers, symbol re-entry limits and a daily loss cap should stop LSK/CVC-style feedback loops.
+3. Rebuild the stop/size/execution model
+Use structural + ATR stops, fixed fractional risk, realistic fills, and execution-aware order types.
+4. Make ML a calibrated selective predictor
+Start with XGBoost/LightGBM on 5m/15m multi-source features; output probability, expected move and uncertainty—not just direction.
+5. Establish institutional-grade validation
+Walk-forward + purged/embargoed CV + realistic costs + DSR/PBO-style selection control + weeks of paper/live shadow testing before scaling.
+14. What I would not do yet
+Do not add more LLM calls or more API keys as a substitute for a real statistical edge.
+Do not optimize RSI/EMA/ATR thresholds against the 24-hour result; that is classic parameter overfitting.
+Do not jump directly to reinforcement learning.
+Do not assume a higher model accuracy or win rate automatically means higher net PnL.
+Do not switch every order to maker just to lower fees; fill quality and signal decay must be modeled.
+Do not interpret one profitable day or one profitable coin as evidence of a durable strategy.
+15. Practical target state
+A robust version of this system should spend most of its time doing nothing. A good intraday system can continuously scan hundreds of contracts but take only a small number of trades when the expected net edge, market regime, liquidity, execution quality and risk constraints align. The desired output at every decision point is not simply “LONG” or “SHORT”; it is a structured record such as: regime=TREND_UP, candidate=YES, P(up)=0.64, expected_move=0.92%, expected_cost=0.22%, stop=0.58%, target=1.25%, edge_score=PASS, risk=0.35%, execution=LIMIT, confidence=HIGH.
+That makes the system auditable. Every trade can later be decomposed into whether the prediction was wrong, the regime classification was wrong, the cost model was wrong, the execution was poor, or the risk policy was wrong. Your current system does not yet provide that clean attribution, which is why the right next step is an evidence pipeline rather than another AI model.
+16. Research and source notes
+[1] Focus Trading Engine v2.0, 24-Hour Simulation Audit, user-provided PDF, 13 Sep 2026.
+[2] Bysik & Ślepaczuk (2026), Machine Learning-Based Bitcoin Trading Under Transaction Costs: Evidence From Walk-Forward Forecasting, SSRN. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6795938
+[3] Kim & Lim (2026), From Predictability to Tradability: Machine-Learning Signals and Trading Frictions in Cryptocurrency Markets, SSRN. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7115197
+[4] Shi et al. (AAAI 2026), Kronos: A Foundation Model for the Language of Financial Markets. https://ojs.aaai.org/index.php/AAAI/article/view/39730
+[5] Qin et al. (2025), FineFT: Efficient and Risk-Aware Ensemble Reinforcement Learning for Futures Trading. https://arxiv.org/abs/2512.23773
+[6] Bandarupalli (2025), Risk-Aware Deep Reinforcement Learning for Crypto and Equity Trading Under Transaction Costs. SSRN 5662930.
+[7] Easley et al. (2026), Microstructure and market dynamics in crypto markets. Journal of Financial Markets.
+[8] Bitcoin LOB forecasting with multivariate Hawkes processes (2026), Decisions in Economics and Finance. https://link.springer.com/article/10.1007/s10203-026-00570-z
+[9] Wang (2025), Exploring Microstructural Dynamics in Cryptocurrency Limit Order Books. SSRN 5331939.
+[10] Bitget Trading Fees FAQ, updated Aug 20 2026. https://www.bitget.com/support/articles/12560603892734
+[11] Freqtrade 2026 documentation: Backtesting, lookahead-analysis, strategy customization. https://docs.freqtrade.io/
+[12] purgedcv (2026): purged/embargoed CV, CPCV, PSR and DSR. https://github.com/eslazarev/purged-cross-validation
+[13] Nefedov (2026), How Much Sharpe is Illusory? Quantifying Backtest Overfitting in Crypto Factor Strategies. SSRN 7350238.
+[14] Santoni et al. (2026), Equity Strategy Backtesting: Luck or Edge? The MinervaScore as a Statistical Robustness Grade. arXiv:2608.23808.
+17. Bottom line
+The existing bot is close to a useful research platform, but it should not be treated as a profitable trading strategy yet. The audit shows the immediate bottleneck is economic selectivity: the bot trades too often, trades instruments with noisy microstructure, pays too much friction, and treats an LLM as a universal approval stamp. The highest-probability path is to make the system deliberately boring—fewer trades, better liquidity, stronger statistical filters, explicit cost thresholds, risk-based sizing, realistic execution and rigorous walk-forward validation—then layer more advanced AI on top only when it adds measurable incremental edge.

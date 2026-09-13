@@ -80,9 +80,23 @@ export interface EngineStatus {
     chop?: number;
     vwap?: number;
     mtf?: string;
+    regime?: string;
     atr?: number;
     volZ?: number;
     timestamp?: string;
+    risk_governor?: {
+      dailyHalted?: boolean;
+      dailyStartingBalance?: number;
+      dailyRealizedPnl?: number;
+      dailyDrawdownPct?: number;
+      activeCooldowns?: Array<{ symbol: string; cooldownRemainingMin: number; consecutiveLosses: number }>;
+      rollingExpectancy?: number;
+      rollingWinRate?: number;
+      llmTotalEvaluations?: number;
+      llmApprovals?: number;
+      llmApprovalRate?: number;
+      version?: string;
+    };
   };
   updated_at?: string;
 }

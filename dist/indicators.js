@@ -1,7 +1,12 @@
 "use strict";
 /**
- * indicators.ts
- * Quantitative indicator engine — EMA, RSI, MACD, ADX, ATR, Volume Z-Score, Choppiness Index (CHOP), VWAP, and MTF Trend.
+ * indicators.ts (v3.0)
+ * Quantitative Indicator & Market Structure Engine
+ *
+ * Computes:
+ * - 15m Structural Regime (EMA 21/50, ADX 14, CHOP 14, VWAP)
+ * - 5m Trigger Dynamics (Pullbacks, Rejection wicks, RSI, Volume Z-Score, ATR)
+ * - Swing High / Low structural support & resistance detection
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.calculateEMA = calculateEMA;
@@ -12,8 +17,9 @@ exports.calculateATR = calculateATR;
 exports.calculateVolumeZScores = calculateVolumeZScores;
 exports.calculateCHOP = calculateCHOP;
 exports.calculateVWAP = calculateVWAP;
-exports.computeMTFTrend = computeMTFTrend;
-exports.computeAllIndicators = computeAllIndicators;
+exports.findSwingLow = findSwingLow;
+exports.findSwingHigh = findSwingHigh;
+exports.computeRegime15m = computeRegime15m;
 function calculateEMA(prices, period) {
     const ema = new Array(prices.length).fill(NaN);
     if (prices.length < period || period <= 0)
@@ -168,9 +174,7 @@ function calculateVolumeZScores(volumes, period = 14) {
 }
 /**
  * Choppiness Index (CHOP)
- * Range: 0 to 100
- * > 61.8 = Market is consolidating / choppy
- * < 38.2 = Market is trending strongly
+ * Range: 0 to 100. > 58 = Choppy / Sideways, < 42 = Strong Trend
  */
 function calculateCHOP(candles, period = 14) {
     const chop = new Array(candles.length).fill(NaN);
@@ -206,9 +210,7 @@ function calculateCHOP(candles, period = 14) {
     }
     return chop;
 }
-/**
- * Volume-Weighted Average Price (VWAP)
- */
+/** Volume-Weighted Average Price (VWAP) */
 function calculateVWAP(candles) {
     const vwap = new Array(candles.length).fill(NaN);
     let cumVol = 0;
@@ -222,82 +224,65 @@ function calculateVWAP(candles) {
     }
     return vwap;
 }
-function computeMTFTrend(candles5m) {
-    if (candles5m.length < 20) {
-        return { trend: 'NEUTRAL', emaFast: 0, emaSlow: 0, rsi5m: 50 };
+/** Structural Swing Levels (Support & Resistance) */
+function findSwingLow(candles, lookback = 10) {
+    if (candles.length === 0)
+        return 0;
+    const slice = candles.slice(-lookback);
+    let minLow = Infinity;
+    for (const c of slice) {
+        if (c.low < minLow)
+            minLow = c.low;
     }
-    const closes = candles5m.map(c => c.close);
-    const emaFastArr = calculateEMA(closes, 9);
-    const emaSlowArr = calculateEMA(closes, 21);
-    const rsiArr = calculateRSI(closes, 14);
-    const last = closes.length - 1;
-    const currentPrice = closes[last];
-    const emaFast = emaFastArr[last] || currentPrice;
-    const emaSlow = emaSlowArr[last] || currentPrice;
-    const rsi5m = rsiArr[last] || 50;
-    if (emaFast > emaSlow && currentPrice >= emaFast && rsi5m >= 48) {
-        return { trend: 'BULLISH', emaFast, emaSlow, rsi5m };
-    }
-    else if (emaFast < emaSlow && currentPrice <= emaFast && rsi5m <= 52) {
-        return { trend: 'BEARISH', emaFast, emaSlow, rsi5m };
-    }
-    return { trend: 'NEUTRAL', emaFast, emaSlow, rsi5m };
+    return minLow;
 }
-/** Derive all signals and filters from candle arrays */
-function computeAllIndicators(candles1m, candles5m = []) {
-    const closes = candles1m.map(c => c.close);
-    const volumes = candles1m.map(c => c.volume);
-    const emaArr = calculateEMA(closes, 14);
+function findSwingHigh(candles, lookback = 10) {
+    if (candles.length === 0)
+        return 0;
+    const slice = candles.slice(-lookback);
+    let maxHigh = -Infinity;
+    for (const c of slice) {
+        if (c.high > maxHigh)
+            maxHigh = c.high;
+    }
+    return maxHigh;
+}
+function computeRegime15m(candles15m) {
+    if (candles15m.length < 20) {
+        return {
+            regime: 'RANGING',
+            ema21: 0,
+            ema50: 0,
+            adx15m: 20,
+            chop15m: 50,
+            vwap15m: 0,
+        };
+    }
+    const closes = candles15m.map(c => c.close);
+    const ema21Arr = calculateEMA(closes, 21);
     const ema50Arr = calculateEMA(closes, 50);
-    const rsiArr = calculateRSI(closes, 14);
-    const macd = calculateMACD(closes, 12, 26, 9);
-    const adxArr = calculateADX(candles1m, 14);
-    const atrArr = calculateATR(candles1m, 14);
-    const zArr = calculateVolumeZScores(volumes, 14);
-    const chopArr = calculateCHOP(candles1m, 14);
-    const vwapArr = calculateVWAP(candles1m);
-    const last = candles1m.length - 1;
-    const prev = last - 1;
-    const latestClose = closes[last];
-    const latestEMA = emaArr[last] || latestClose;
-    const latestEMA50 = ema50Arr[last] || latestEMA;
-    const latestRSI = rsiArr[last] || 50;
-    const latestADX = adxArr[last] || 0;
-    const latestATR = atrArr[last] || (latestClose * 0.01);
-    const latestZScore = zArr[last] || 0;
-    const latestCHOP = !isNaN(chopArr[last]) ? chopArr[last] : 45;
-    const latestVWAP = !isNaN(vwapArr[last]) ? vwapArr[last] : latestClose;
-    const latestMACD = macd.macdLine[last] || 0;
-    const latestSignal = macd.signalLine[last] || 0;
-    const latestHist = macd.histogram[last] || 0;
-    const prevHist = macd.histogram[prev] || 0;
-    const mtf = computeMTFTrend(candles5m);
-    return {
-        latestClose,
-        latestEMA,
-        latestEMA50,
-        latestRSI,
-        latestADX,
-        latestATR,
-        latestZScore,
-        latestCHOP,
-        latestVWAP,
-        latestMACD,
-        latestSignal,
-        latestHist,
-        prevHist,
-        isChoppy: latestCHOP > 62,
-        aboveVWAP: latestClose >= latestVWAP,
-        emaCrossover: latestClose >= latestEMA,
-        ema50Bullish: latestClose >= latestEMA50,
-        rsiOversold: latestRSI < 30,
-        rsiOverbought: latestRSI > 70,
-        macdBullish: latestHist > 0 && latestHist > prevHist,
-        macdBearish: latestHist < 0 && latestHist < prevHist,
-        macdCrossUp: latestMACD > latestSignal,
-        macdCrossDown: latestMACD < latestSignal,
-        mtfTrend: mtf.trend,
-        mtfRsi: mtf.rsi5m,
-    };
+    const adxArr = calculateADX(candles15m, 14);
+    const chopArr = calculateCHOP(candles15m, 14);
+    const vwapArr = calculateVWAP(candles15m);
+    const last = closes.length - 1;
+    const price = closes[last];
+    const ema21 = ema21Arr[last] || price;
+    const ema50 = ema50Arr[last] || price;
+    const adx15m = adxArr[last] || 20;
+    const chop15m = !isNaN(chopArr[last]) ? chopArr[last] : 50;
+    const vwap15m = vwapArr[last] || price;
+    // High Volatility Chop
+    if (chop15m > 58 || adx15m < 20) {
+        return { regime: 'VOLATILE_CHOP', ema21, ema50, adx15m, chop15m, vwap15m };
+    }
+    // Bullish Trend
+    if (ema21 > ema50 && price >= ema21 && price >= vwap15m && adx15m >= 22) {
+        return { regime: 'TRENDING_BULL', ema21, ema50, adx15m, chop15m, vwap15m };
+    }
+    // Bearish Trend
+    if (ema21 < ema50 && price <= ema21 && price <= vwap15m && adx15m >= 22) {
+        return { regime: 'TRENDING_BEAR', ema21, ema50, adx15m, chop15m, vwap15m };
+    }
+    return { regime: 'RANGING', ema21, ema50, adx15m, chop15m, vwap15m };
 }
 //# sourceMappingURL=indicators.js.map

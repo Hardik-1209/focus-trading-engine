@@ -12,11 +12,13 @@ exports.registerPosition = registerPosition;
 exports.onTick = onTick;
 exports.closePosition = closePosition;
 /**
- * position-guardian.ts
- * High-precision position guardian with ATR dynamic trailing stops, risk-managed exits, and telemetry.
+ * position-guardian.ts (v3.0)
+ * High-precision position guardian with structural ATR stops, dynamic breakeven,
+ * and Risk Governor streak callbacks.
  */
 const config_1 = require("./config");
 const supabase_logger_1 = require("./supabase-logger");
+const risk_governor_1 = require("./risk-governor");
 const ws_1 = __importDefault(require("ws"));
 const activePositions = new Map();
 let guardianWs = null;
@@ -25,10 +27,10 @@ const subscribedSymbols = new Set();
 function startGuardianWs() {
     if (guardianWs && guardianWs.readyState === ws_1.default.OPEN)
         return;
-    console.log(`[Guardian] Connecting to Bitget WS to monitor active positions...`);
+    console.log(`[Guardian v3.0] Connecting to Bitget WS to monitor active positions...`);
     guardianWs = new ws_1.default('wss://ws.bitget.com/v2/ws/public');
     guardianWs.on('open', () => {
-        console.log(`[Guardian] ✅ Connected to Bitget WS. Actively monitoring ticks for open positions.`);
+        console.log(`[Guardian v3.0] ✅ Connected to Bitget WS. Actively monitoring ticks.`);
         guardianPingTimer = setInterval(() => {
             if (guardianWs?.readyState === ws_1.default.OPEN)
                 guardianWs.send('ping');
@@ -99,7 +101,7 @@ function displayActiveTrades() {
     }
     else {
         for (const [sym, pos] of activePositions.entries()) {
-            console.log(`  ➤ ${sym} [${pos.positionSide}] | Entry: $${pos.entryPrice.toFixed(4)} | Size: ${pos.amount.toFixed(2)} | ATR: ${pos.atr?.toFixed(4) || 'N/A'}`);
+            console.log(`  ➤ ${sym} [${pos.positionSide}] | Entry: $${pos.entryPrice.toFixed(4)} | SL: $${pos.stopLossPrice?.toFixed(4)} | TP: $${pos.takeProfitPrice?.toFixed(4)}`);
         }
     }
     console.log(`============================================================\n`);
@@ -125,7 +127,7 @@ async function syncOpenPositions() {
         });
     }
     if (activePositions.size > 0) {
-        console.log(`[Guardian] Synced ${activePositions.size} open position(s): ${[...activePositions.keys()].join(', ')}`);
+        console.log(`[Guardian v3.0] Synced ${activePositions.size} open position(s): ${[...activePositions.keys()].join(', ')}`);
         updateGuardianSubscriptions();
     }
 }
@@ -143,8 +145,9 @@ function registerPosition(params) {
         ...params,
         openedAt: Date.now(),
         peakPrice: params.entryPrice,
+        isBreakevenSet: false,
     });
-    console.log(`[Guardian] 📍 Registered: ${params.symbol} ${params.positionSide} @ $${params.entryPrice}`);
+    console.log(`[Guardian v3.0] 📍 Registered: ${params.symbol} ${params.positionSide} @ $${params.entryPrice} | SL: $${params.stopLossPrice?.toFixed(4)} | TP: $${params.takeProfitPrice?.toFixed(4)}`);
     updateGuardianSubscriptions();
 }
 /** Called on every WebSocket tick — evaluates all open positions */
@@ -153,112 +156,88 @@ async function onTick(tick) {
     if (!pos || pos.isClosing)
         return;
     const currentPrice = tick.lastPrice;
-    const { LEVERAGE, TAKE_PROFIT_PCT, TRAILING_STOP_PCT, MAX_LOSS_PCT, FEE_RATE, MIN_HOLD_MINUTES, MAX_HOLD_HOURS, STALE_HOLD_HOURS, STALE_PROFIT_THRESHOLD, USE_ATR_STOP, ATR_MULTIPLIER, } = config_1.RISK;
-    // Update peak price
+    const { LEVERAGE, FEE_RATE, MAX_HOLD_HOURS, STALE_HOLD_HOURS, STALE_PROFIT_THRESHOLD, BREAKEVEN_ATR_TRIGGER, TRAILING_STOP_ATR_MULT, } = config_1.RISK;
+    // Update peak favorable price
     if (pos.positionSide === 'LONG' && currentPrice > pos.peakPrice)
         pos.peakPrice = currentPrice;
     if (pos.positionSide === 'SHORT' && currentPrice < pos.peakPrice)
         pos.peakPrice = currentPrice;
     const minutesHeld = (Date.now() - pos.openedAt) / 60000;
     const hoursHeld = minutesHeld / 60;
-    const isHoldMet = minutesHeld >= MIN_HOLD_MINUTES;
-    // Raw price change percentage (unleveraged)
     const priceMovePct = pos.positionSide === 'LONG'
         ? (currentPrice - pos.entryPrice) / pos.entryPrice
         : (pos.entryPrice - currentPrice) / pos.entryPrice;
-    // Leveraged return percentage
     const returnPct = priceMovePct * LEVERAGE;
-    // ─── 1. HARD STOP LOSS (Always active regardless of hold time) ───────────────
-    if (returnPct <= -MAX_LOSS_PCT) {
-        await closePosition(pos, currentPrice, `MAX_LOSS: Hit hard stop at ${(returnPct * 100).toFixed(2)}%`);
-        return;
+    // ─── 1. STRUCTURAL / ATR STOP LOSS ──────────────────────────────────────────
+    if (pos.stopLossPrice) {
+        if (pos.positionSide === 'LONG' && currentPrice <= pos.stopLossPrice) {
+            const exitTag = pos.isBreakevenSet ? 'BREAKEVEN_STOP' : 'STRUCTURAL_ATR_STOP';
+            await closePosition(pos, currentPrice, `${exitTag}: Hit stop loss @ $${pos.stopLossPrice.toFixed(4)}`);
+            return;
+        }
+        else if (pos.positionSide === 'SHORT' && currentPrice >= pos.stopLossPrice) {
+            const exitTag = pos.isBreakevenSet ? 'BREAKEVEN_STOP' : 'STRUCTURAL_ATR_STOP';
+            await closePosition(pos, currentPrice, `${exitTag}: Hit stop loss @ $${pos.stopLossPrice.toFixed(4)}`);
+            return;
+        }
     }
-    // ─── 2. ATR / TRAILING STOP (Protects profits once in the green) ──────────────
-    let isTrailingStopHit = false;
-    let trailReason = '';
-    if (USE_ATR_STOP && pos.atr && pos.atr > 0) {
-        const atrDist = pos.atr * ATR_MULTIPLIER;
+    // ─── 2. TAKE PROFIT TARGET ──────────────────────────────────────────────────
+    if (pos.takeProfitPrice) {
+        if (pos.positionSide === 'LONG' && currentPrice >= pos.takeProfitPrice) {
+            await closePosition(pos, currentPrice, `TAKE_PROFIT: Reached dynamic target @ $${pos.takeProfitPrice.toFixed(4)} (+${(returnPct * 100).toFixed(1)}%)`);
+            return;
+        }
+        else if (pos.positionSide === 'SHORT' && currentPrice <= pos.takeProfitPrice) {
+            await closePosition(pos, currentPrice, `TAKE_PROFIT: Reached dynamic target @ $${pos.takeProfitPrice.toFixed(4)} (+${(returnPct * 100).toFixed(1)}%)`);
+            return;
+        }
+    }
+    // ─── 3. DYNAMIC BREAKEVEN STOP ACTIVATION (+Fee Buffer) ─────────────────────
+    if (pos.atr && pos.atr > 0 && !pos.isBreakevenSet) {
+        const profitDist = pos.positionSide === 'LONG'
+            ? currentPrice - pos.entryPrice
+            : pos.entryPrice - currentPrice;
+        if (profitDist >= pos.atr * BREAKEVEN_ATR_TRIGGER) {
+            const roundTripFeeBuffer = FEE_RATE * 2;
+            const breakevenPrice = pos.positionSide === 'LONG'
+                ? pos.entryPrice * (1 + roundTripFeeBuffer)
+                : pos.entryPrice * (1 - roundTripFeeBuffer);
+            pos.stopLossPrice = breakevenPrice;
+            pos.isBreakevenSet = true;
+            console.log(`[Guardian v3.0] 🛡️ ${pos.symbol} Breakeven Stop Activated @ $${breakevenPrice.toFixed(4)} (Risk-Free Trade)`);
+        }
+    }
+    // ─── 4. ATR TRAILING STOP FOR RUNNERS ───────────────────────────────────────
+    if (pos.atr && pos.atr > 0 && pos.isBreakevenSet) {
+        const trailDist = pos.atr * TRAILING_STOP_ATR_MULT;
         if (pos.positionSide === 'LONG') {
-            const trailStopPrice = pos.peakPrice - atrDist;
-            if (currentPrice <= trailStopPrice && pos.peakPrice > pos.entryPrice) {
-                isTrailingStopHit = true;
-                trailReason = `ATR_TRAILING_STOP: Price dipped below stop $${trailStopPrice.toFixed(4)} (ATR: ${pos.atr.toFixed(4)})`;
+            const candidateStop = pos.peakPrice - trailDist;
+            if (candidateStop > (pos.stopLossPrice || 0)) {
+                pos.stopLossPrice = candidateStop;
             }
         }
         else {
-            const trailStopPrice = pos.peakPrice + atrDist;
-            if (currentPrice >= trailStopPrice && pos.peakPrice < pos.entryPrice) {
-                isTrailingStopHit = true;
-                trailReason = `ATR_TRAILING_STOP: Price rallied above stop $${trailStopPrice.toFixed(4)} (ATR: ${pos.atr.toFixed(4)})`;
+            const candidateStop = pos.peakPrice + trailDist;
+            if (candidateStop < (pos.stopLossPrice || Infinity)) {
+                pos.stopLossPrice = candidateStop;
             }
         }
     }
-    else {
-        // Percentage-based trailing stop on price retrace from peak
-        const peakGain = pos.positionSide === 'LONG'
-            ? (pos.peakPrice - pos.entryPrice) / pos.entryPrice
-            : (pos.entryPrice - pos.peakPrice) / pos.entryPrice;
-        if (peakGain >= 0.015) { // Only trail once gain > 1.5%
-            const retraceFromPeak = pos.positionSide === 'LONG'
-                ? (pos.peakPrice - currentPrice) / pos.peakPrice
-                : (currentPrice - pos.peakPrice) / pos.peakPrice;
-            if (retraceFromPeak >= (pos.trailingStopPct || TRAILING_STOP_PCT)) {
-                isTrailingStopHit = true;
-                trailReason = `TRAILING_STOP: ${(retraceFromPeak * 100).toFixed(2)}% retrace from peak $${pos.peakPrice.toFixed(4)}`;
-            }
-        }
-    }
-    if (isTrailingStopHit) {
-        await closePosition(pos, currentPrice, trailReason);
-        return;
-    }
-    // ─── 2.5 DYNAMIC ATR BREAKEVEN STOP ─────────────────────────────────────────
-    if (pos.atr && pos.atr > 0) {
-        const isProfitable = pos.positionSide === 'LONG'
-            ? (currentPrice - pos.entryPrice) >= (pos.atr * 1.0)
-            : (pos.entryPrice - currentPrice) >= (pos.atr * 1.0);
-        if (isProfitable && !pos.stopLossPrice) {
-            // Move stop loss to breakeven + round-trip fee
-            const breakevenPrice = pos.positionSide === 'LONG'
-                ? pos.entryPrice * (1 + FEE_RATE * 2)
-                : pos.entryPrice * (1 - FEE_RATE * 2);
-            pos.stopLossPrice = breakevenPrice;
-            console.log(`[Guardian] 🛡️ ${pos.symbol} Breakeven Stop Activated @ $${breakevenPrice.toFixed(4)} (Guaranteed Risk-Free)`);
-        }
-        if (pos.stopLossPrice) {
-            if (pos.positionSide === 'LONG' && currentPrice <= pos.stopLossPrice) {
-                await closePosition(pos, currentPrice, `BREAKEVEN_STOP: Protected capital at $${pos.stopLossPrice.toFixed(4)}`);
-                return;
-            }
-            else if (pos.positionSide === 'SHORT' && currentPrice >= pos.stopLossPrice) {
-                await closePosition(pos, currentPrice, `BREAKEVEN_STOP: Protected capital at $${pos.stopLossPrice.toFixed(4)}`);
-                return;
-            }
-        }
-    }
-    // ─── 3. TAKE PROFIT TARGET (Instant Execution upon reaching target) ─────────
-    if (returnPct >= TAKE_PROFIT_PCT) {
-        await closePosition(pos, currentPrice, `TAKE_PROFIT: Reached target +${(returnPct * 100).toFixed(2)}%`);
-        return;
-    }
-    // If min hold time is not yet met, keep trade open unless stopped or taken profit
-    if (!isHoldMet)
-        return;
-    // ─── 4. MAX HOLD DURATION ────────────────────────────────────────────────────
+    // ─── 5. MAX HOLD TIME ───────────────────────────────────────────────────────
     if (hoursHeld >= MAX_HOLD_HOURS) {
-        await closePosition(pos, currentPrice, `MAX_HOLD_TIME: ${hoursHeld.toFixed(2)}h elapsed`);
+        await closePosition(pos, currentPrice, `MAX_HOLD_TIME: ${hoursHeld.toFixed(1)}h elapsed`);
         return;
     }
-    // ─── 5. STALE POSITION EXIT ──────────────────────────────────────────────────
-    if (hoursHeld >= STALE_HOLD_HOURS && Math.abs(returnPct) < STALE_PROFIT_THRESHOLD) {
-        await closePosition(pos, currentPrice, `STALE_POSITION: Consolidating flat (${(returnPct * 100).toFixed(2)}%) after ${hoursHeld.toFixed(2)}h`);
+    // ─── 6. STALE POSITION CONSOLIDATION EXIT ───────────────────────────────────
+    if (hoursHeld >= STALE_HOLD_HOURS && Math.abs(priceMovePct) < STALE_PROFIT_THRESHOLD) {
+        await closePosition(pos, currentPrice, `STALE_POSITION: Consolidating flat (${(returnPct * 100).toFixed(2)}%) after ${hoursHeld.toFixed(1)}h`);
         return;
     }
 }
-/** Close position in DB, adjust wallet balance, and update subscriptions */
+/** Close position in DB, adjust wallet balance, update Risk Governor, and log */
 async function closePosition(pos, exitPrice, reason) {
     pos.isClosing = true;
-    console.log(`\n🚨 [Guardian] EXIT for ${pos.symbol}: ${reason}`);
+    console.log(`\n🚨 [Guardian v3.0] EXIT for ${pos.symbol}: ${reason}`);
     const notionalEntry = pos.amount * pos.entryPrice;
     const notionalExit = pos.amount * exitPrice;
     const grossPnl = pos.positionSide === 'LONG'
@@ -266,7 +245,9 @@ async function closePosition(pos, exitPrice, reason) {
         : (pos.entryPrice - exitPrice) * pos.amount;
     const totalFees = (notionalEntry + notionalExit) * config_1.RISK.FEE_RATE;
     const netPnl = parseFloat((grossPnl - totalFees).toFixed(4));
-    const returnPct = parseFloat(((netPnl / (notionalEntry / config_1.RISK.LEVERAGE)) * 100).toFixed(2));
+    const marginAllocated = notionalEntry / config_1.RISK.LEVERAGE;
+    const returnPct = parseFloat(((netPnl / marginAllocated) * 100).toFixed(2));
+    const isWin = netPnl > 0;
     try {
         await (0, supabase_logger_1.updateFuturesTrade)(pos.tradeId, {
             status: 'CLOSED',
@@ -279,7 +260,9 @@ async function closePosition(pos, exitPrice, reason) {
         });
         await (0, supabase_logger_1.adjustWalletBalanceAtomic)(netPnl);
         const newBal = await (0, supabase_logger_1.fetchWalletBalance)().catch(() => 0);
-        console.log(`[Guardian] ✅ ${pos.symbol} ${pos.positionSide} CLOSED | Entry: $${pos.entryPrice} → Exit: $${exitPrice} | Net PnL: $${netPnl} | New Balance: $${newBal.toFixed(2)}`);
+        // Record trade outcome in Risk Governor (streak & drawdown tracking)
+        risk_governor_1.riskGovernor.recordTradeOutcome(pos.symbol, netPnl, isWin);
+        console.log(`[Guardian v3.0] ✅ ${pos.symbol} ${pos.positionSide} CLOSED | Entry: $${pos.entryPrice} → Exit: $${exitPrice} | Net PnL: $${netPnl} | New Balance: $${newBal.toFixed(2)}`);
         await (0, supabase_logger_1.logFocusEvent)({
             event_type: 'TRADE_EXIT',
             symbol: pos.symbol,

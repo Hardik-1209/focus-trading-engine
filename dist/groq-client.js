@@ -5,8 +5,9 @@ exports.evaluateRiskVerdictWithGroq = evaluateRiskVerdictWithGroq;
 exports.getActiveGroqKeyIndex = getActiveGroqKeyIndex;
 exports.getGroqUsageSummary = getGroqUsageSummary;
 /**
- * groq-client.ts
- * Cloud LLM Engine — Groq API with seamless 5-key rotation and rate-limit recovery.
+ * groq-client.ts (v3.0)
+ * Cloud LLM Engine — Adversarial Quantitative Chief Risk Officer
+ * Seamless multi-key rotation across Groq array with rate-limit failover.
  */
 const config_1 = require("./config");
 // Key usage & rotation tracker
@@ -18,12 +19,10 @@ function getNextGroqKey() {
     if (config_1.CONFIG.GROQ_KEYS.length === 0)
         throw new Error('No Groq API keys configured');
     const now = Date.now();
-    // Clear keys whose rate limit cooldown (60s) has passed
     for (const [k, expiry] of rateLimitedKeys.entries()) {
         if (now > expiry)
             rateLimitedKeys.delete(k);
     }
-    // Try finding a key that is not currently rate-limited
     for (let i = 0; i < config_1.CONFIG.GROQ_KEYS.length; i++) {
         const idx = (currentKeyIndex + i) % config_1.CONFIG.GROQ_KEYS.length;
         const candidate = config_1.CONFIG.GROQ_KEYS[idx];
@@ -33,7 +32,6 @@ function getNextGroqKey() {
             return { key: candidate, index: idx };
         }
     }
-    // If all are rate-limited, use least-recently-limited
     const fallbackKey = config_1.CONFIG.GROQ_KEYS[currentKeyIndex % config_1.CONFIG.GROQ_KEYS.length];
     currentKeyIndex = (currentKeyIndex + 1) % config_1.CONFIG.GROQ_KEYS.length;
     keyUsage.set(fallbackKey, (keyUsage.get(fallbackKey) || 0) + 1);
@@ -67,14 +65,14 @@ async function callGroqWithRotation(system, user, timeoutMs = 12000) {
                         { role: 'user', content: user },
                     ],
                     response_format: { type: 'json_object' },
-                    temperature: 0.1,
-                    max_tokens: 800,
+                    temperature: 0.05,
+                    max_tokens: 600,
                 }),
                 signal: AbortSignal.timeout(timeoutMs),
             });
             if (res.status === 429) {
                 console.warn(`[Groq] Key #${index + 1} rate-limited. Rotating to next key...`);
-                rateLimitedKeys.set(key, Date.now() + 60000); // 60s cooldown
+                rateLimitedKeys.set(key, Date.now() + 60000);
                 continue;
             }
             if (!res.ok) {
@@ -95,36 +93,56 @@ async function callGroqWithRotation(system, user, timeoutMs = 12000) {
     throw lastError || new Error('All Groq keys failed');
 }
 async function evaluateNarrativeWithGroq(symbol, description, skillContext = '') {
-    const system = 'You are an expert quantitative crypto research analyst. ' +
-        'Evaluate narrative strength and catalyst potential. ' +
+    const system = 'You are an adversarial quantitative crypto risk analyst. ' +
+        'Evaluate narrative strength and catalyst validity. Be skeptical of hype. ' +
         'Keep reasoning under 25 words. ' +
         'Return ONLY valid JSON matching this schema: {"narrative_category": string, "confidence_score": number (0-100), "reasoning": string}.' +
         (skillContext ? `\nContext: ${skillContext}` : '');
     const user = `Asset: ${symbol}\n` +
-        `Description: ${description}\n\n` +
-        `Evaluate if this token has strong momentum catalysts or narrative tailwinds.\n` +
+        `Data: ${description}\n\n` +
+        `Does this asset have genuine institutional volume momentum, or is it an illiquid retail trap?\n` +
         `Return JSON: {"narrative_category":"string","confidence_score":number(0-100),"reasoning":"string"}`;
     return callGroqWithRotation(system, user);
 }
+/**
+ * v3.0 Adversarial Chief Risk Officer (CRO) Gatekeeper
+ * Evaluates setup against strict 5-point disqualification criteria.
+ * Target approval rate: 20% - 35%.
+ */
 async function evaluateRiskVerdictWithGroq(params) {
-    const system = 'You are an elite quantitative crypto risk manager. ' +
-        'Evaluate short-term futures trade viability based on technical momentum, volume flow, and narrative alignment. ' +
-        'Be decisive: favor LONG or SHORT when trend and momentum agree. Keep reasoning under 25 words. ' +
-        'Return ONLY valid JSON matching this schema: {"verdict": "LONG" | "SHORT" | "VETO" | "WARN", "allocationUsd": number (0-100), "reasoning": string}.';
-    const user = `Evaluate futures trade setup for: ${params.symbol}\n` +
-        `Macro: ${params.macroRegime}, Hostile: ${params.isMacroHostile}\n` +
-        `Security: ${JSON.stringify(params.auditBlock)}\n` +
-        `Technicals: RSI=${params.technicalBlock.latestRSI.toFixed(1)}, ADX=${params.technicalBlock.latestADX.toFixed(1)}, ` +
-        `Price>EMA=${params.technicalBlock.emaCrossover}, MACD_Bull=${params.technicalBlock.macdBullish}, MACD_Bear=${params.technicalBlock.macdBearish}, ` +
-        `VolumeZ=${params.technicalBlock.latestZScore.toFixed(2)}\n` +
-        `Narrative: ${JSON.stringify(params.narrativeBlock)}\n\n` +
-        `Rules:\n` +
-        `- LONG: RSI bullish (>48), Price>EMA or MACD bullish, not hostile. High probability.\n` +
-        `- SHORT: RSI bearish (<52), Price<EMA or MACD bearish, not hostile. High probability.\n` +
-        `- VETO: scam risk or severe macro hostile\n` +
-        `- WARN: extreme conflict only\n\n` +
-        `Return JSON: {"verdict":"LONG"|"SHORT"|"VETO"|"WARN","allocationUsd":number(0-100),"reasoning":"string"}`;
-    return callGroqWithRotation(system, user);
+    const system = 'You are an uncompromising, skeptical Chief Risk Officer (CRO) at a multi-million dollar quantitative crypto fund. ' +
+        'Your sole mission is to PROTECT CAPITAL by rejecting fragile, low-edge, or crowded trade setups. ' +
+        'Your default answer is VETO. You only APPROVE when a setup possesses exceptional confluence and clear edge. ' +
+        'Strictly reject candidate trades if ANY of the following 5 disqualifiers are present:\n' +
+        '1. EXHAUSTION: For LONG: 5m RSI > 66 or price far above VWAP. For SHORT: 5m RSI < 34 or price far below VWAP.\n' +
+        '2. FAKE BREAKOUT / WEAK VOLUME: 5m Volume Z-score < 1.0 or volume contracting.\n' +
+        '3. RISK-TO-REWARD DEFICIT: Planned Reward:Risk is below 1.6:1.\n' +
+        '4. CROWDING / DERIVATIVES RISK: Extreme funding rate (> +0.02% for longs or < -0.02% for shorts indicates squeeze danger).\n' +
+        '5. CHOPPY REGIME: 15m CHOP > 55 or ADX < 22 indicates trend exhaustion.\n\n' +
+        'Return ONLY valid JSON: {\n' +
+        '  "verdict": "APPROVE" | "VETO",\n' +
+        '  "confidence": number (0-100),\n' +
+        '  "disqualifiers": string[],\n' +
+        '  "reasoning": string\n' +
+        '}';
+    const t = params.technicalBlock;
+    const user = `AUDIT CANDIDATE SETUP:\n` +
+        `Symbol: ${params.symbol} | Proposed Action: ${params.action}\n` +
+        `Current Price: $${t.currentPrice} | SL: $${params.stopLossPrice} | TP: $${params.takeProfitPrice}\n` +
+        `Planned Reward:Risk: ${params.plannedRR}:1\n` +
+        `Funding Rate: ${params.fundingRate !== undefined ? (params.fundingRate * 100).toFixed(4) + '%' : 'Neutral'}\n` +
+        `15m Regime: ${t.regime15m} | 15m ADX: ${t.adx15m} | 15m CHOP: ${t.chop15m}\n` +
+        `5m RSI: ${t.rsi5m} | 5m ATR: $${t.atr5m} | 5m Volume Z-Score: ${t.volumeZ5m}\n\n` +
+        `Audit against all 5 disqualifiers. If ANY apply, return VETO.\n` +
+        `Return JSON: {"verdict":"APPROVE"|"VETO","confidence":number,"disqualifiers":["string"],"reasoning":"string"}`;
+    const res = await callGroqWithRotation(system, user);
+    return {
+        verdict: res.verdict === 'APPROVE' ? 'APPROVE' : 'VETO',
+        confidence: typeof res.confidence === 'number' ? res.confidence : 50,
+        disqualifiers: Array.isArray(res.disqualifiers) ? res.disqualifiers : [],
+        reasoning: res.reasoning || (res.verdict === 'APPROVE' ? 'Approved high-conviction confluence' : 'Disqualified by risk audit'),
+        allocationUsd: res.verdict === 'APPROVE' ? 100 : 0,
+    };
 }
 function getActiveGroqKeyIndex() {
     return currentKeyIndex;

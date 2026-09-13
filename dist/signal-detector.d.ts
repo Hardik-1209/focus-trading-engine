@@ -1,28 +1,27 @@
-import type { Candle, HigherTimeframeTrend } from './indicators';
+import type { Candle, MarketRegime } from './indicators';
 export type SignalAction = 'LONG' | 'SHORT' | 'WAIT';
-export type SignalTier = 1 | 2 | 3;
 export interface DetectedSignal {
     action: SignalAction;
-    tier: SignalTier;
-    skipLLM: boolean;
+    regime: MarketRegime;
+    stopLossPrice: number;
+    takeProfitPrice: number;
+    plannedRR: number;
+    atr: number;
     indicators: {
-        rsi: number;
-        adx: number;
-        atr: number;
-        chop: number;
-        vwap: number;
-        macdHist: number;
-        macdBullish: boolean;
-        macdBearish: boolean;
-        emaCrossover: boolean;
-        ema50Bullish: boolean;
-        aboveVWAP: boolean;
-        volumeZ: number;
-        latestClose: number;
-        latestEMA: number;
-        mtfTrend: HigherTimeframeTrend;
+        rsi5m: number;
+        atr5m: number;
+        volumeZ5m: number;
+        vwap5m: number;
+        ema9_5m: number;
+        ema21_5m: number;
+        regime15m: MarketRegime;
+        adx15m: number;
+        chop15m: number;
+        swingLow: number;
+        swingHigh: number;
+        currentPrice: number;
     };
     reason: string;
 }
-export declare function detectSignal(candles1m: Candle[], currentPrice: number, candles5m?: Candle[]): DetectedSignal;
+export declare function detectSignal(candles5m: Candle[], currentPrice: number, candles15m?: Candle[]): DetectedSignal;
 //# sourceMappingURL=signal-detector.d.ts.map

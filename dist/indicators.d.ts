@@ -1,6 +1,11 @@
 /**
- * indicators.ts
- * Quantitative indicator engine — EMA, RSI, MACD, ADX, ATR, Volume Z-Score, Choppiness Index (CHOP), VWAP, and MTF Trend.
+ * indicators.ts (v3.0)
+ * Quantitative Indicator & Market Structure Engine
+ *
+ * Computes:
+ * - 15m Structural Regime (EMA 21/50, ADX 14, CHOP 14, VWAP)
+ * - 5m Trigger Dynamics (Pullbacks, Rejection wicks, RSI, Volume Z-Score, ATR)
+ * - Swing High / Low structural support & resistance detection
  */
 export interface Candle {
     timestamp: number;
@@ -23,48 +28,21 @@ export declare function calculateATR(candles: Candle[], period?: number): number
 export declare function calculateVolumeZScores(volumes: number[], period?: number): number[];
 /**
  * Choppiness Index (CHOP)
- * Range: 0 to 100
- * > 61.8 = Market is consolidating / choppy
- * < 38.2 = Market is trending strongly
+ * Range: 0 to 100. > 58 = Choppy / Sideways, < 42 = Strong Trend
  */
 export declare function calculateCHOP(candles: Candle[], period?: number): number[];
-/**
- * Volume-Weighted Average Price (VWAP)
- */
+/** Volume-Weighted Average Price (VWAP) */
 export declare function calculateVWAP(candles: Candle[]): number[];
-export type HigherTimeframeTrend = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-export declare function computeMTFTrend(candles5m: Candle[]): {
-    trend: HigherTimeframeTrend;
-    emaFast: number;
-    emaSlow: number;
-    rsi5m: number;
-};
-/** Derive all signals and filters from candle arrays */
-export declare function computeAllIndicators(candles1m: Candle[], candles5m?: Candle[]): {
-    latestClose: number;
-    latestEMA: number;
-    latestEMA50: number;
-    latestRSI: number;
-    latestADX: number;
-    latestATR: number;
-    latestZScore: number;
-    latestCHOP: number;
-    latestVWAP: number;
-    latestMACD: number;
-    latestSignal: number;
-    latestHist: number;
-    prevHist: number;
-    isChoppy: boolean;
-    aboveVWAP: boolean;
-    emaCrossover: boolean;
-    ema50Bullish: boolean;
-    rsiOversold: boolean;
-    rsiOverbought: boolean;
-    macdBullish: boolean;
-    macdBearish: boolean;
-    macdCrossUp: boolean;
-    macdCrossDown: boolean;
-    mtfTrend: HigherTimeframeTrend;
-    mtfRsi: number;
+/** Structural Swing Levels (Support & Resistance) */
+export declare function findSwingLow(candles: Candle[], lookback?: number): number;
+export declare function findSwingHigh(candles: Candle[], lookback?: number): number;
+export type MarketRegime = 'TRENDING_BULL' | 'TRENDING_BEAR' | 'RANGING' | 'VOLATILE_CHOP';
+export declare function computeRegime15m(candles15m: Candle[]): {
+    regime: MarketRegime;
+    ema21: number;
+    ema50: number;
+    adx15m: number;
+    chop15m: number;
+    vwap15m: number;
 };
 //# sourceMappingURL=indicators.d.ts.map

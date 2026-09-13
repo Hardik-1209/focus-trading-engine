@@ -18,11 +18,13 @@ export declare class BitgetWS extends EventEmitter {
     private reconnectDelay;
     private candle1mBuffer;
     private candle5mBuffer;
+    private candle15mBuffer;
     constructor(symbol: string);
     /** Seed the buffer with historical candles fetched via REST */
-    seedCandles(candles: Candle[], timeframe?: '1m' | '5m'): void;
+    seedCandles(candles: Candle[], timeframe?: '1m' | '5m' | '15m'): void;
     get candles1m(): Candle[];
     get candles5m(): Candle[];
+    get candles15m(): Candle[];
     connect(): void;
     private subscribe;
     private handleMessage;

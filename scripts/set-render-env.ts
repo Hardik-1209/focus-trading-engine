@@ -23,7 +23,7 @@ async function setRenderEnvAndDeploy() {
     { key: 'GROQ_API_KEY3', value: process.env.GROQ_API_KEY3 || '' },
     { key: 'GROQ_API_KEY4', value: process.env.GROQ_API_KEY4 || '' },
     { key: 'GROQ_API_KEY5', value: process.env.GROQ_API_KEY5 || '' },
-    { key: 'WATCH_DURATION_MINUTES', value: '30' },
+    { key: 'WATCH_DURATION_MINUTES', value: '5' },
     { key: 'DRY_RUN', value: 'true' },
     { key: 'MIN_VOLUME_USDT', value: '500000' },
     { key: 'VITE_SUPABASE_URL', value: process.env.SUPABASE_URL || '' },

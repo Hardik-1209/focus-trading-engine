@@ -18,10 +18,11 @@ export const supabase = (() => {
 })();
 
 /**
- * Recalculates dashboard telemetry metrics based on the current trade list.
+ * Recalculates dashboard telemetry metrics based on active (unarchived) trades.
  */
 function recalculateTelemetry(trades: FuturesTrade[]) {
-  const closedTrades = trades.filter(t => t.status === 'CLOSED');
+  const activeTrades = trades.filter(t => !t.is_archived);
+  const closedTrades = activeTrades.filter(t => t.status === 'CLOSED');
   const totalClosed = closedTrades.length;
   
   let realizedPnl = 0;
@@ -38,7 +39,7 @@ function recalculateTelemetry(trades: FuturesTrade[]) {
   const winRate = totalClosed > 0 ? winningTradesCount / totalClosed : 0;
 
   return {
-    totalTrades: trades.length,
+    totalTrades: activeTrades.length,
     winRate,
     realizedPnl
   };
@@ -92,19 +93,19 @@ export function useSupabaseStream() {
       }
     };
 
-    // 2. Fetch initial trades
+    // 2. Fetch initial trades (up to 1000 to cover all historical snapshots)
     const fetchInitialTrades = async () => {
       try {
         const { data, error } = await client
           .from('futures_trades')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(100);
+          .limit(1000);
         if (error) throw error;
         if (data) {
           const parsedTrades = data as FuturesTrade[];
           setTrades(parsedTrades);
-          // Recalculate based on current state
+          // Recalculate based on active unarchived trades
           const metrics = recalculateTelemetry(parsedTrades);
           updateTelemetry(metrics);
         }

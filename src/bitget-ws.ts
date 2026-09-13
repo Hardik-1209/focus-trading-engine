@@ -1,8 +1,8 @@
 /**
- * bitget-ws.ts
+ * bitget-ws.ts (v3.0)
  * Persistent Bitget WebSocket client.
- * Subscribes to ticker + 1min candles for one coin.
- * Emits events: 'tick', 'candle1m', 'candle5m', 'connected', 'disconnected'
+ * Subscribes to ticker, 5m candles, and 15m candles.
+ * Emits events: 'tick', 'candle5m', 'candle15m', 'connected', 'disconnected'
  */
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
@@ -28,9 +28,10 @@ export class BitgetWS extends EventEmitter {
   private shouldReconnect = true;
   private reconnectDelay  = 1000;
 
-  // Rolling 1min candle buffer (latest 100 candles)
+  // Rolling candle buffers
   private candle1mBuffer: Candle[] = [];
   private candle5mBuffer: Candle[] = [];
+  private candle15mBuffer: Candle[] = [];
 
   constructor(symbol: string) {
     super();
@@ -38,22 +39,24 @@ export class BitgetWS extends EventEmitter {
   }
 
   /** Seed the buffer with historical candles fetched via REST */
-  seedCandles(candles: Candle[], timeframe: '1m' | '5m' = '1m') {
-    if (timeframe === '1m') this.candle1mBuffer = [...candles].slice(-100);
-    else                    this.candle5mBuffer = [...candles].slice(-100);
+  seedCandles(candles: Candle[], timeframe: '1m' | '5m' | '15m' = '5m') {
+    if (timeframe === '15m') this.candle15mBuffer = [...candles].slice(-100);
+    else if (timeframe === '5m') this.candle5mBuffer = [...candles].slice(-100);
+    else this.candle1mBuffer = [...candles].slice(-100);
     console.log(`[WS] Seeded ${candles.length} ${timeframe} candles for ${this.symbol}`);
   }
 
-  get candles1m(): Candle[]  { return [...this.candle1mBuffer]; }
-  get candles5m(): Candle[]  { return [...this.candle5mBuffer]; }
+  get candles1m(): Candle[]   { return [...this.candle1mBuffer]; }
+  get candles5m(): Candle[]   { return [...this.candle5mBuffer]; }
+  get candles15m(): Candle[]  { return [...this.candle15mBuffer]; }
 
   connect() {
     console.log(`[WS] Connecting to Bitget for ${this.symbol}...`);
     this.ws = new WebSocket(WS_URL);
 
     this.ws.on('open', () => {
-      console.log(`[WS] ✅ Connected. Subscribing to ${this.symbol} streams...`);
-      this.reconnectDelay = 1000; // reset backoff
+      console.log(`[WS] ✅ Connected. Subscribing to ${this.symbol} streams (ticker + 5m + 15m)...`);
+      this.reconnectDelay = 1000;
       this.subscribe();
       this.startPing();
       this.emit('connected', this.symbol);
@@ -62,12 +65,10 @@ export class BitgetWS extends EventEmitter {
     this.ws.on('message', (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString());
-        if (msg.event === 'subscribe') return; // ignore ack
+        if (msg.event === 'subscribe') return;
         if (msg.data) this.handleMessage(msg);
         else if (msg.event === 'error') {
           console.error(`[WS] Error from Bitget:`, msg);
-        } else {
-          console.log(`[WS] Unhandled message:`, msg);
         }
       } catch { /* ignore malformed */ }
     });
@@ -88,16 +89,16 @@ export class BitgetWS extends EventEmitter {
   private subscribe() {
     const args = [
       { instType: 'USDT-FUTURES', channel: 'ticker',    instId: this.symbol },
-      { instType: 'USDT-FUTURES', channel: 'candle1m',  instId: this.symbol },
       { instType: 'USDT-FUTURES', channel: 'candle5m',  instId: this.symbol },
+      { instType: 'USDT-FUTURES', channel: 'candle15m', instId: this.symbol },
     ];
     this.ws?.send(JSON.stringify({ op: 'subscribe', args }));
-    console.log(`[WS] Subscribed: ticker + candle1m + candle5m for ${this.symbol}`);
+    console.log(`[WS] Subscribed: ticker + candle5m + candle15m for ${this.symbol}`);
   }
 
   private handleMessage(msg: any) {
     const channel = msg.arg?.channel as string;
-    
+
     if (channel === 'ticker') {
       const data = msg.data?.[0];
       if (!data) return;
@@ -112,22 +113,6 @@ export class BitgetWS extends EventEmitter {
       };
       this.emit('tick', tick);
 
-    } else if (channel === 'candle1m') {
-      if (!msg.data || !Array.isArray(msg.data)) return;
-      for (const d of msg.data) {
-        const candle = this.parseCandle(d);
-        if (candle) this.upsertCandle(this.candle1mBuffer, candle);
-      }
-      this.candle1mBuffer.sort((a, b) => a.timestamp - b.timestamp);
-      if (this.candle1mBuffer.length > 100) this.candle1mBuffer = this.candle1mBuffer.slice(-100);
-      
-      const latest = this.candle1mBuffer[this.candle1mBuffer.length - 1];
-      if (latest && msg.action !== 'snapshot') {
-        this.emit('candle1m', latest, [...this.candle1mBuffer]);
-      } else if (latest && msg.action === 'snapshot') {
-        this.emit('candle1m', latest, [...this.candle1mBuffer]);
-      }
-
     } else if (channel === 'candle5m') {
       if (!msg.data || !Array.isArray(msg.data)) return;
       for (const d of msg.data) {
@@ -136,12 +121,24 @@ export class BitgetWS extends EventEmitter {
       }
       this.candle5mBuffer.sort((a, b) => a.timestamp - b.timestamp);
       if (this.candle5mBuffer.length > 100) this.candle5mBuffer = this.candle5mBuffer.slice(-100);
-      
+
       const latest = this.candle5mBuffer[this.candle5mBuffer.length - 1];
-      if (latest && msg.action !== 'snapshot') {
-        this.emit('candle5m', latest, [...this.candle5mBuffer]);
-      } else if (latest && msg.action === 'snapshot') {
-        this.emit('candle5m', latest, [...this.candle5mBuffer]);
+      if (latest) {
+        this.emit('candle5m', latest, [...this.candle5mBuffer], [...this.candle15mBuffer]);
+      }
+
+    } else if (channel === 'candle15m') {
+      if (!msg.data || !Array.isArray(msg.data)) return;
+      for (const d of msg.data) {
+        const candle = this.parseCandle(d);
+        if (candle) this.upsertCandle(this.candle15mBuffer, candle);
+      }
+      this.candle15mBuffer.sort((a, b) => a.timestamp - b.timestamp);
+      if (this.candle15mBuffer.length > 100) this.candle15mBuffer = this.candle15mBuffer.slice(-100);
+
+      const latest = this.candle15mBuffer[this.candle15mBuffer.length - 1];
+      if (latest) {
+        this.emit('candle15m', latest, [...this.candle15mBuffer]);
       }
     }
   }

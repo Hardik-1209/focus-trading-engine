@@ -11,6 +11,7 @@ export interface ActivePosition {
     trailingStopPct?: number;
     takeProfitPrice?: number;
     stopLossPrice?: number;
+    isBreakevenSet?: boolean;
     tier?: number;
     llmSource?: string;
     isClosing?: boolean;
@@ -35,6 +36,6 @@ export declare function registerPosition(params: {
 }): void;
 /** Called on every WebSocket tick — evaluates all open positions */
 export declare function onTick(tick: TickData): Promise<void>;
-/** Close position in DB, adjust wallet balance, and update subscriptions */
+/** Close position in DB, adjust wallet balance, update Risk Governor, and log */
 export declare function closePosition(pos: ActivePosition, exitPrice: number, reason: string): Promise<void>;
 //# sourceMappingURL=position-guardian.d.ts.map

@@ -13,7 +13,7 @@ const remoteUrl = `https://${token}@github.com/Hardik-1209/focus-trading-engine.
 console.log('[Git] Adding modified and new files...');
 execSync('git add -A', { stdio: 'inherit' });
 
-const commitMsg = 'feat: dynamic cycle telemetry, Groq AI trade audit modal, and soft-delete snapshot reset system';
+const commitMsg = 'feat(v3.0): Focus Engine v3.0 — 15m structural regime, adversarial CRO risk governor, clean-slate session reset, and mobile-optimized UI';
 try {
   execSync(`git commit -m "${commitMsg}"`, { stdio: 'inherit' });
 } catch {

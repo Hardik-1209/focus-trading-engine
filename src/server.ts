@@ -10,6 +10,7 @@ import path from 'path';
 import { CONFIG } from './config';
 import { getGroqUsageSummary } from './groq-client';
 import { fetchWalletBalance, fetchOpenFuturesTrades } from './supabase-logger';
+import { riskGovernor } from './risk-governor';
 
 let currentFocusedCoin = 'None';
 let engineCycleCount = 0;
@@ -60,7 +61,8 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
         const health = {
           status: 'HEALTHY',
           service: 'focus-trading-engine',
-          mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation)' : 'LIVE',
+          version: CONFIG.VERSION,
+          mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.0)' : 'LIVE (v3.0)',
           uptime_seconds: uptimeSeconds,
           cycle_count: engineCycleCount,
           focused_coin: currentFocusedCoin,
@@ -74,6 +76,7 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
             entry: t.entry_price,
             size: t.amount,
           })),
+          risk_governor: riskGovernor.getStatus(),
           groq_cloud_llm: getGroqUsageSummary(),
           timestamp: new Date().toISOString(),
         };

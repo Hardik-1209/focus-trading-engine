@@ -1,6 +1,6 @@
 /**
- * llm-router.ts
- * Cloud LLM Router — High-speed reasoning via Groq with smart key rotation.
+ * llm-router.ts (v3.0)
+ * Cloud LLM Router with Adversarial Risk Gate & Telemetry
  */
 import { NarrativeScore, RiskVerdict, RiskParams } from './groq-client';
 export declare function evaluateNarrative(symbol: string, description: string, skillContext?: string): Promise<NarrativeScore & {

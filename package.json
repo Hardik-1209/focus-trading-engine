@@ -1,6 +1,6 @@
 {
   "name": "focus-trading-engine",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "24/7 cloud-native focus trading engine with Groq LLM rotation and real-time dashboard",
   "main": "dist/main.js",
   "scripts": {
@@ -16,10 +16,14 @@
     "@supabase/supabase-js": "^2.39.0",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^20.11.0",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/pdfkit": "^0.17.6",
     "@types/ws": "^8.5.10",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.4.1",
     "node-fetch": "^3.3.2",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
     "ws": "^8.16.0"

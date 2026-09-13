@@ -17,6 +17,7 @@ const path_1 = __importDefault(require("path"));
 const config_1 = require("./config");
 const groq_client_1 = require("./groq-client");
 const supabase_logger_1 = require("./supabase-logger");
+const risk_governor_1 = require("./risk-governor");
 let currentFocusedCoin = 'None';
 let engineCycleCount = 0;
 const startTime = Date.now();
@@ -58,7 +59,8 @@ function startHttpServer(port = config_1.CONFIG.PORT) {
                 const health = {
                     status: 'HEALTHY',
                     service: 'focus-trading-engine',
-                    mode: config_1.CONFIG.DRY_RUN ? 'DRY_RUN (Simulation)' : 'LIVE',
+                    version: config_1.CONFIG.VERSION,
+                    mode: config_1.CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.0)' : 'LIVE (v3.0)',
                     uptime_seconds: uptimeSeconds,
                     cycle_count: engineCycleCount,
                     focused_coin: currentFocusedCoin,
@@ -72,6 +74,7 @@ function startHttpServer(port = config_1.CONFIG.PORT) {
                         entry: t.entry_price,
                         size: t.amount,
                     })),
+                    risk_governor: risk_governor_1.riskGovernor.getStatus(),
                     groq_cloud_llm: (0, groq_client_1.getGroqUsageSummary)(),
                     timestamp: new Date().toISOString(),
                 };

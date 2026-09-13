@@ -2,134 +2,134 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectSignal = detectSignal;
 /**
- * signal-detector.ts
- * Quantitative Multi-Timeframe Signal Engine with CHOP, VWAP, ATR & Volatility Confirmation.
+ * signal-detector.ts (v3.0)
+ * Quantitative Multi-Timeframe Structural Pullback Engine
  *
- * Tier 1 — High-Conviction Pullback: 5m MTF aligned + 1m Pullback + Non-Choppy (CHOP < 62) → Instant Execute
- * Tier 2 — Momentum Breakout: 5m MTF aligned + 1m Momentum Surge → Groq Cloud LLM Validation
- * Tier 3 — Chop / Counter-Trend: Ignore noise, wait for clean setup
+ * Implements:
+ * 1. 15-minute Trend & Regime Confirmation (HMM / Structural Trend Alignment)
+ * 2. 5-minute Pullback & Value-Zone Rejection
+ * 3. Dynamic Triple Barrier Target Geometry (Structural Stop + 1.8x ATR, Target 3.2x ATR)
+ * 4. Microstructure Volume Z-Score Expansion
  */
 const config_1 = require("./config");
 const indicators_1 = require("./indicators");
-function detectSignal(candles1m, currentPrice, candles5m = []) {
-    if (candles1m.length < 30) {
-        return mkWait('Insufficient 1m candle history (<30)', candles1m, candles5m, currentPrice);
+function detectSignal(candles5m, currentPrice, candles15m = []) {
+    if (candles5m.length < 20 || candles15m.length < 20) {
+        return mkWait('Insufficient historical candles (need >=20 x 5m and 15m)', currentPrice, 'RANGING');
     }
-    const ind = (0, indicators_1.computeAllIndicators)(candles1m, candles5m);
-    const { latestRSI: rsi, latestADX: adx, latestATR: atr, latestCHOP: chop, latestVWAP: vwap, latestHist: macdHist, prevHist, macdBullish, macdBearish, macdCrossUp, macdCrossDown, emaCrossover, ema50Bullish, aboveVWAP, isChoppy, latestZScore: volumeZ, latestClose, latestEMA, mtfTrend, } = ind;
-    const indicators = {
-        rsi, adx, atr, chop, vwap, macdHist, macdBullish, macdBearish,
-        emaCrossover, ema50Bullish, aboveVWAP, volumeZ, latestClose, latestEMA, mtfTrend,
+    // 1. 15-Minute Regime Classification
+    const { regime, adx15m, chop15m } = (0, indicators_1.computeRegime15m)(candles15m);
+    if (regime === 'VOLATILE_CHOP') {
+        return mkWait(`Market in volatile chop on 15m (CHOP=${chop15m.toFixed(1)}>58, ADX=${adx15m.toFixed(1)}). Capital protected.`, currentPrice, regime);
+    }
+    if (regime === 'RANGING') {
+        return mkWait(`Market in horizontal ranging state on 15m. Awaiting directional breakout.`, currentPrice, regime);
+    }
+    // 2. 5-Minute Technical Indicators
+    const closes5m = candles5m.map(c => c.close);
+    const volumes5m = candles5m.map(c => c.volume);
+    const ema9Arr = (0, indicators_1.calculateEMA)(closes5m, 9);
+    const ema21Arr = (0, indicators_1.calculateEMA)(closes5m, 21);
+    const rsiArr = (0, indicators_1.calculateRSI)(closes5m, 14);
+    const atrArr = (0, indicators_1.calculateATR)(candles5m, 14);
+    const zArr = (0, indicators_1.calculateVolumeZScores)(volumes5m, 14);
+    const vwapArr = (0, indicators_1.calculateVWAP)(candles5m);
+    const macd = (0, indicators_1.calculateMACD)(closes5m, 12, 26, 9);
+    const lastIdx = closes5m.length - 1;
+    const ema9 = ema9Arr[lastIdx] || currentPrice;
+    const ema21 = ema21Arr[lastIdx] || currentPrice;
+    const rsi5m = rsiArr[lastIdx] || 50;
+    const atr5m = atrArr[lastIdx] || (currentPrice * 0.015);
+    const volumeZ5m = zArr[lastIdx] || 0;
+    const vwap5m = vwapArr[lastIdx] || currentPrice;
+    const macdHist = macd.histogram[lastIdx] || 0;
+    const prevHist = macd.histogram[lastIdx - 1] || 0;
+    const swingLow = (0, indicators_1.findSwingLow)(candles5m, 10);
+    const swingHigh = (0, indicators_1.findSwingHigh)(candles5m, 10);
+    const ind = {
+        rsi5m: parseFloat(rsi5m.toFixed(1)),
+        atr5m: parseFloat(atr5m.toFixed(5)),
+        volumeZ5m: parseFloat(volumeZ5m.toFixed(2)),
+        vwap5m: parseFloat(vwap5m.toFixed(4)),
+        ema9_5m: parseFloat(ema9.toFixed(4)),
+        ema21_5m: parseFloat(ema21.toFixed(4)),
+        regime15m: regime,
+        adx15m: parseFloat(adx15m.toFixed(1)),
+        chop15m: parseFloat(chop15m.toFixed(1)),
+        swingLow,
+        swingHigh,
+        currentPrice,
     };
-    // ─── FILTER: Choppiness Index (CHOP > 62 = Sideways Ranging) ─────────────────
-    if (isChoppy) {
-        return mkWait(`Market choppy/consolidating (CHOP=${chop.toFixed(1)}>62). Awaiting directional expansion.`, candles1m, candles5m, currentPrice);
-    }
-    // ─── FILTER: Higher Timeframe (5m) Trend Alignment ──────────────────────────
-    const allowLong = !config_1.SIGNAL.USE_5M_FILTER || mtfTrend !== 'BEARISH';
-    const allowShort = !config_1.SIGNAL.USE_5M_FILTER || mtfTrend !== 'BULLISH';
-    // ─── TIER 1: HIGH CONVICTION PULLBACK (Instant Execution) ───────────────────
-    // Strong uptrend (5m Bullish + 1m ADX > 22 + Price >= VWAP), Price dips temporarily, Volume expands
-    if (allowLong &&
-        mtfTrend === 'BULLISH' &&
-        rsi <= 48 &&
-        rsi >= 30 &&
-        aboveVWAP &&
-        (macdBullish || macdCrossUp) &&
-        emaCrossover &&
-        adx >= 20 &&
-        volumeZ >= 0.8) {
-        return {
-            action: 'LONG',
-            tier: 1,
-            skipLLM: true,
-            indicators,
-            reason: `TIER1 PULLBACK LONG: 5M=BULLISH, RSI=${rsi.toFixed(1)}, Price>VWAP, ADX=${adx.toFixed(1)}, VolZ=${volumeZ.toFixed(2)}`,
-        };
-    }
-    // Strong downtrend (5m Bearish + 1m ADX > 22 + Price <= VWAP), Price rallies temporarily, Volume expands
-    if (allowShort &&
-        mtfTrend === 'BEARISH' &&
-        rsi >= 52 &&
-        rsi <= 70 &&
-        !aboveVWAP &&
-        (macdBearish || macdCrossDown) &&
-        !emaCrossover &&
-        adx >= 20 &&
-        volumeZ >= 0.8) {
-        return {
-            action: 'SHORT',
-            tier: 1,
-            skipLLM: true,
-            indicators,
-            reason: `TIER1 PULLBACK SHORT: 5M=BEARISH, RSI=${rsi.toFixed(1)}, Price<VWAP, ADX=${adx.toFixed(1)}, VolZ=${volumeZ.toFixed(2)}`,
-        };
-    }
-    // ─── TIER 2: MOMENTUM BREAKOUT (Confirm with Groq Cloud LLM) ─────────────────
-    // Bullish momentum surge: 5m is not bearish, 1m RSI expanding (50-68), MACD improving
-    if (allowLong &&
-        rsi >= 50 &&
-        rsi <= 68 &&
+    // ─── HIGH CONVICTION PULLBACK: LONG ──────────────────────────────────────────
+    // 15m is TRENDING_BULL, 5m price pulled back into EMA21/VWAP (RSI 38-50), volume expands
+    if (regime === 'TRENDING_BULL' &&
+        rsi5m <= config_1.SIGNAL.RSI_PULLBACK_LONG &&
+        rsi5m >= 34 &&
+        currentPrice >= (ema21 - atr5m * 0.5) &&
         macdHist > prevHist &&
-        macdHist > 0 &&
-        emaCrossover &&
-        adx >= 18) {
+        volumeZ5m >= 0.8) {
+        // Dynamic Triple Barrier Geometry
+        const rawStopDist = Math.max(currentPrice - swingLow, atr5m * config_1.RISK.STOP_LOSS_ATR_MULT);
+        const stopLossPrice = currentPrice - rawStopDist;
+        const takeProfitPrice = currentPrice + (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
+        const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / (currentPrice - stopLossPrice)).toFixed(2));
         return {
             action: 'LONG',
-            tier: 2,
-            skipLLM: false,
-            indicators,
-            reason: `TIER2 MOMENTUM LONG: 5M=${mtfTrend}, RSI=${rsi.toFixed(1)}, MACD expanding, ADX=${adx.toFixed(1)} — sending to Groq LLM`,
+            regime,
+            stopLossPrice,
+            takeProfitPrice,
+            plannedRR,
+            atr: atr5m,
+            indicators: ind,
+            reason: `15M_BULL_PULLBACK: 15m=BULL, 5m RSI=${rsi5m.toFixed(1)} pulled into EMA21/VWAP, planned RR=${plannedRR}:1`,
         };
     }
-    // Bearish momentum surge: 5m is not bullish, 1m RSI contracting (32-50), MACD deteriorating
-    if (allowShort &&
-        rsi <= 50 &&
-        rsi >= 32 &&
+    // ─── HIGH CONVICTION PULLBACK: SHORT ─────────────────────────────────────────
+    // 15m is TRENDING_BEAR, 5m price rallied into EMA21/VWAP (RSI 50-62), volume expands
+    if (regime === 'TRENDING_BEAR' &&
+        rsi5m >= config_1.SIGNAL.RSI_PULLBACK_SHORT &&
+        rsi5m <= 66 &&
+        currentPrice <= (ema21 + atr5m * 0.5) &&
         macdHist < prevHist &&
-        macdHist < 0 &&
-        !emaCrossover &&
-        adx >= 18) {
+        volumeZ5m >= 0.8) {
+        const rawStopDist = Math.max(swingHigh - currentPrice, atr5m * config_1.RISK.STOP_LOSS_ATR_MULT);
+        const stopLossPrice = currentPrice + rawStopDist;
+        const takeProfitPrice = currentPrice - (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
+        const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / (stopLossPrice - currentPrice)).toFixed(2));
         return {
             action: 'SHORT',
-            tier: 2,
-            skipLLM: false,
-            indicators,
-            reason: `TIER2 MOMENTUM SHORT: 5M=${mtfTrend}, RSI=${rsi.toFixed(1)}, MACD expanding down, ADX=${adx.toFixed(1)} — sending to Groq LLM`,
+            regime,
+            stopLossPrice,
+            takeProfitPrice,
+            plannedRR,
+            atr: atr5m,
+            indicators: ind,
+            reason: `15M_BEAR_PULLBACK: 15m=BEAR, 5m RSI=${rsi5m.toFixed(1)} rallied into EMA21/VWAP, planned RR=${plannedRR}:1`,
         };
     }
-    // ─── TIER 3: WAIT ────────────────────────────────────────────────────────────
-    return mkWait(`1m candle ($${currentPrice.toFixed(4)}) → No confluence. 5M=${mtfTrend}, RSI=${rsi.toFixed(1)}, CHOP=${chop.toFixed(1)}, ADX=${adx.toFixed(1)}`, candles1m, candles5m, currentPrice);
+    return mkWait(`5m bar waiting for pullback. 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)}, VolZ=${volumeZ5m.toFixed(2)}, ADX=${adx15m.toFixed(1)}`, currentPrice, regime, ind);
 }
-function mkWait(reason, candles1m, candles5m, price) {
-    const ind = candles1m.length >= 30
-        ? (0, indicators_1.computeAllIndicators)(candles1m, candles5m)
-        : {
-            latestRSI: 50, latestADX: 0, latestATR: price * 0.01, latestCHOP: 50, latestVWAP: price,
-            latestHist: 0, macdBullish: false, macdBearish: false, emaCrossover: false,
-            ema50Bullish: false, aboveVWAP: true, latestZScore: 0, latestClose: price, latestEMA: price,
-            prevHist: 0, mtfTrend: 'NEUTRAL',
-        };
+function mkWait(reason, currentPrice, regime, ind) {
     return {
         action: 'WAIT',
-        tier: 3,
-        skipLLM: true,
-        indicators: {
-            rsi: ind.latestRSI,
-            adx: ind.latestADX,
-            atr: ind.latestATR,
-            chop: ind.latestCHOP,
-            vwap: ind.latestVWAP,
-            macdHist: ind.latestHist,
-            macdBullish: ind.macdBullish,
-            macdBearish: ind.macdBearish,
-            emaCrossover: ind.emaCrossover,
-            ema50Bullish: ind.ema50Bullish,
-            aboveVWAP: ind.aboveVWAP,
-            volumeZ: ind.latestZScore,
-            latestClose: ind.latestClose,
-            latestEMA: ind.latestEMA,
-            mtfTrend: ind.mtfTrend,
+        regime,
+        stopLossPrice: 0,
+        takeProfitPrice: 0,
+        plannedRR: 0,
+        atr: 0,
+        indicators: ind || {
+            rsi5m: 50,
+            atr5m: 0,
+            volumeZ5m: 0,
+            vwap5m: currentPrice,
+            ema9_5m: currentPrice,
+            ema21_5m: currentPrice,
+            regime15m: regime,
+            adx15m: 20,
+            chop15m: 50,
+            swingLow: 0,
+            swingHigh: 0,
+            currentPrice,
         },
         reason,
     };

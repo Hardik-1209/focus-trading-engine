@@ -1,12 +1,13 @@
 /**
- * focus-engine.ts
- * Quantitative 30-min Focus Orchestrator with Multi-Timeframe Confirmation (1m + 5m),
- * Groq Cloud LLM Validation, and ATR Volatility Targets.
+ * focus-engine.ts (v3.0)
+ * Quantitative 15m/5m Multi-Timeframe Focus Orchestrator with Adversarial Groq Risk Auditor,
+ * Risk Governor Circuit Breakers, and Dynamic Triple Barrier Geometry.
  */
 import { selectHottestCoin, fetchBootstrapCandles } from './coin-selector';
 import { BitgetWS, TickData } from './bitget-ws';
 import { detectSignal } from './signal-detector';
 import { evaluateNarrative, evaluateRiskVerdict } from './llm-router';
+import { riskGovernor } from './risk-governor';
 import {
   syncOpenPositions,
   hasOpenPosition,
@@ -33,11 +34,11 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const lastSignalTime: Map<string, number> = new Map();
 let analysisInProgress = false;
 
-/** Watch a single coin for up to WATCH_DURATION_MS or until a trade closes */
-async function watchCoin(symbol: string, cycleNumber: number): Promise<'trade_closed' | 'timeout' | 'no_trade' | 'stagnant_rotated'> {
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log(`👁  FOCUS: ${symbol} | Max watch: ${CONFIG.WATCH_DURATION_MS / 60000} min (Cycle #${cycleNumber})`);
-  console.log(`${'═'.repeat(60)}\n`);
+/** Watch a single coin on 15m/5m candles until trade closes, timeout, or chop exit */
+async function watchCoin(symbol: string, cycleNumber: number, fundingRate?: number): Promise<'trade_closed' | 'timeout' | 'no_trade' | 'stagnant_rotated'> {
+  console.log(`\n${'═'.repeat(65)}`);
+  console.log(`👁  FOCUS v3.0: ${symbol} | Max watch: ${CONFIG.WATCH_DURATION_MS / 60000} min (Cycle #${cycleNumber})`);
+  console.log(`${'═'.repeat(65)}\n`);
 
   setServerFocusedCoin(symbol, cycleNumber);
   updateEngineStatus({
@@ -47,89 +48,88 @@ async function watchCoin(symbol: string, cycleNumber: number): Promise<'trade_cl
     is_running: true,
   }).catch(() => {});
 
-  // 1. Bootstrap 1m & 5m historical candles
-  let bootstrapCandles1m: Candle[] = [];
+  // 1. Bootstrap 5m & 15m historical candles
   let bootstrapCandles5m: Candle[] = [];
+  let bootstrapCandles15m: Candle[] = [];
   try {
-    const [c1m, c5m] = await Promise.all([
-      fetchBootstrapCandles(symbol, 60, '1m'),
-      fetchBootstrapCandles(symbol, 40, '5m'),
+    const [c5m, c15m] = await Promise.all([
+      fetchBootstrapCandles(symbol, 60, '5m'),
+      fetchBootstrapCandles(symbol, 40, '15m'),
     ]);
-    bootstrapCandles1m = c1m;
     bootstrapCandles5m = c5m;
-    console.log(`[Engine] Bootstrapped ${bootstrapCandles1m.length} x 1m and ${bootstrapCandles5m.length} x 5m candles`);
+    bootstrapCandles15m = c15m;
+    console.log(`[Engine v3.0] Bootstrapped ${bootstrapCandles5m.length} x 5m and ${bootstrapCandles15m.length} x 15m candles`);
   } catch (err: any) {
-    console.warn(`[Engine] Bootstrap warning: ${err.message}. Initializing empty buffer.`);
+    console.warn(`[Engine] Bootstrap warning: ${err.message}. Initializing empty buffers.`);
   }
 
   // 2. Connect WebSocket
   const ws = new BitgetWS(symbol);
-  ws.seedCandles(bootstrapCandles1m, '1m');
   ws.seedCandles(bootstrapCandles5m, '5m');
+  ws.seedCandles(bootstrapCandles15m, '15m');
 
-  // Immediately broadcast focused symbol & cycle to engine_status so UI is never stale
   updateEngineStatus({
     focused_symbol: symbol,
     cycle_count: cycleNumber,
     active_trades_count: getActivePositionsCount(),
     live_indicators: {
-      price: bootstrapCandles1m[bootstrapCandles1m.length - 1]?.close || 0,
+      price: bootstrapCandles5m[bootstrapCandles5m.length - 1]?.close || 0,
       timestamp: new Date().toISOString(),
     },
   }).catch(() => {});
 
-  let tradeClosedSignal = false;
   let tradeOpened = false;
-  let lastLoggedMinute = 0;
+  let lastLoggedBar = 0;
   let stagnantCandlesCount = 0;
 
-  ws.on('tick', (_tick: TickData) => {
-    // Ticks are also monitored globally by position-guardian.ts
-  });
-
-  // 3. Candle 1m close event — run quantitative signal detection
-  ws.on('candle1m', async (latestCandle: Candle, allCandles: Candle[]) => {
-    if (tradeClosedSignal || analysisInProgress) return;
+  // 3. Candle 5m close event — run quantitative 15m/5m signal detection
+  ws.on('candle5m', async (latestCandle: Candle, allCandles5m: Candle[], allCandles15m: Candle[]) => {
+    if (analysisInProgress) return;
     if (tradeOpened && !hasOpenPosition(symbol)) return;
-
-    // Don't seek new entries if already holding this symbol
     if (hasOpenPosition(symbol)) return;
 
-    // Signal cooldown check
+    // Check Risk Governor circuit breaker
+    const govCheck = riskGovernor.canTradeSymbol(symbol);
+    if (!govCheck.allowed) {
+      console.warn(`[Engine v3.0] Symbol ${symbol} blocked by Risk Governor: ${govCheck.reason}`);
+      return;
+    }
+
+    // Cooldown check
     const lastSig = lastSignalTime.get(symbol) || 0;
     if (Date.now() - lastSig < SIGNAL.SIGNAL_COOLDOWN_MS) return;
 
-    // Detect signal with 5m multi-timeframe confirmation
-    const signal = detectSignal(allCandles, latestCandle.close, ws.candles5m);
+    // Run multi-timeframe signal detection
+    const signal = detectSignal(allCandles5m, latestCandle.close, allCandles15m);
 
-    // Broadcast live telemetry indicators to engine_status for dashboard
+    // Broadcast live telemetry
     updateEngineStatus({
       focused_symbol: symbol,
       cycle_count: cycleNumber,
       active_trades_count: getActivePositionsCount(),
       live_indicators: {
         price: latestCandle.close,
-        rsi: parseFloat(signal.indicators.rsi.toFixed(1)),
-        adx: parseFloat(signal.indicators.adx.toFixed(1)),
-        chop: parseFloat(signal.indicators.chop.toFixed(1)),
-        vwap: parseFloat(signal.indicators.vwap.toFixed(4)),
-        mtf: signal.indicators.mtfTrend,
-        atr: parseFloat(signal.indicators.atr.toFixed(4)),
-        volZ: parseFloat(signal.indicators.volumeZ.toFixed(2)),
+        rsi: signal.indicators.rsi5m,
+        adx: signal.indicators.adx15m,
+        chop: signal.indicators.chop15m,
+        vwap: signal.indicators.vwap5m,
+        regime: signal.indicators.regime15m,
+        atr: signal.indicators.atr5m,
+        volZ: signal.indicators.volumeZ5m,
         timestamp: new Date().toISOString(),
       },
     }).catch(() => {});
 
     if (signal.action === 'WAIT') {
-      if (signal.indicators.adx < 20 || signal.indicators.chop > 60) {
+      if (signal.regime === 'VOLATILE_CHOP' || signal.regime === 'RANGING') {
         stagnantCandlesCount++;
       } else {
         stagnantCandlesCount = 0;
       }
 
-      if (latestCandle.timestamp !== lastLoggedMinute) {
-        console.log(`[Engine] ⏳ ${signal.reason}`);
-        lastLoggedMinute = latestCandle.timestamp;
+      if (latestCandle.timestamp !== lastLoggedBar) {
+        console.log(`[Engine v3.0] ⏳ ${signal.reason}`);
+        lastLoggedBar = latestCandle.timestamp;
 
         await logFocusEvent({
           event_type: 'SYSTEM_PING',
@@ -142,119 +142,72 @@ async function watchCoin(symbol: string, cycleNumber: number): Promise<'trade_cl
       return;
     }
 
-    console.log(`\n[Engine] 🔔 Signal detected! ${signal.action} (Tier ${signal.tier})`);
-    console.log(`[Engine] ${signal.reason}`);
+    console.log(`\n[Engine v3.0] 🔔 Setup detected! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1`);
+    console.log(`[Engine v3.0] ${signal.reason}`);
 
     lastSignalTime.set(symbol, Date.now());
     analysisInProgress = true;
 
     try {
-      let finalAction: 'LONG' | 'SHORT' | 'VETO' | 'WARN' = signal.action;
-      let llmSource = 'rule-based';
-      let confidenceScore = 80;
-      let llmReasoning = '';
+      // 4. Adversarial Chief Risk Officer (CRO) Audit via Groq
+      console.log(`[Engine v3.0] 🛡️ Routing setup to Adversarial Groq CRO for 5-point disqualification audit...`);
 
-      // Tier 2 — validate with Groq Cloud LLM
-      if (!signal.skipLLM) {
-        console.log(`[Engine] 🤖 Tier 2 edge-case signal — requesting Groq Cloud LLM verification...`);
+      const verdict = await evaluateRiskVerdict({
+        symbol,
+        action: signal.action,
+        plannedRR: signal.plannedRR,
+        stopLossPrice: signal.stopLossPrice,
+        takeProfitPrice: signal.takeProfitPrice,
+        fundingRate,
+        technicalBlock: {
+          rsi5m: signal.indicators.rsi5m,
+          atr5m: signal.indicators.atr5m,
+          volumeZ5m: signal.indicators.volumeZ5m,
+          vwap5m: signal.indicators.vwap5m,
+          regime15m: signal.indicators.regime15m,
+          adx15m: signal.indicators.adx15m,
+          chop15m: signal.indicators.chop15m,
+          currentPrice: latestCandle.close,
+        },
+      });
 
-        const description =
-          `5M_Trend=${signal.indicators.mtfTrend}, RSI=${signal.indicators.rsi.toFixed(1)}, ` +
-          `ADX=${signal.indicators.adx.toFixed(1)}, ATR=${signal.indicators.atr.toFixed(4)}, ` +
-          `MACD_hist=${signal.indicators.macdHist.toFixed(6)}, Price>EMA=${signal.indicators.emaCrossover}, ` +
-          `VolZ=${signal.indicators.volumeZ.toFixed(2)}, Price=$${latestCandle.close}`;
-
-        const narrative = await evaluateNarrative(symbol, description);
-        llmSource = narrative.llmSource;
-        confidenceScore = narrative.confidence_score;
-
-        console.log(`[Engine] Narrative (${narrative.llmSource}): ${narrative.narrative_category} (Score: ${narrative.confidence_score}/100)`);
-
-        const verdict = await evaluateRiskVerdict({
-          symbol,
-          auditBlock: { isScam: false, scamRiskScore: 2, flags: [], details: 'Audited' },
-          technicalBlock: {
-            emaCrossover:    signal.indicators.emaCrossover,
-            latestEMA:       signal.indicators.latestEMA,
-            latestADX:       signal.indicators.adx,
-            latestZScore:    signal.indicators.volumeZ,
-            latestRSI:       signal.indicators.rsi,
-            rsiOversold:     signal.indicators.rsi < 30,
-            rsiOverbought:   signal.indicators.rsi > 70,
-            macdBullish:     signal.indicators.macdBullish,
-            macdBearish:     signal.indicators.macdBearish,
-            macdCrossUp:     signal.indicators.emaCrossover && signal.indicators.macdBullish,
-            macdCrossDown:   !signal.indicators.emaCrossover && signal.indicators.macdBearish,
-            latestHistogram: signal.indicators.macdHist,
-          },
-          narrativeBlock: {
-            narrativeCategory: narrative.narrative_category,
-            confidenceScore:   narrative.confidence_score,
-            reasoning:         narrative.reasoning,
-          },
-          macroRegime:    'RISK_ON',
-          isMacroHostile: false,
-        });
-
-        finalAction = verdict.verdict;
-        llmReasoning = `[${verdict.llmSource}] ${verdict.reasoning}`;
-        console.log(`[Engine] LLM verdict (${verdict.llmSource}): ${finalAction} — ${verdict.reasoning}`);
-
-        await logFocusEvent({
-          event_type: 'LLM_EVALUATION',
-          symbol,
-          tier: signal.tier,
-          llm_source: `${verdict.llmSource}: ${verdict.reasoning}`,
-          action: finalAction,
-          indicators: signal.indicators as any,
-          message: `Groq Verdict: ${finalAction}`,
-        });
-      }
+      const approved = verdict.verdict === 'APPROVE';
+      const llmReasoning = `[${verdict.llmSource}] ${verdict.reasoning}`;
 
       // Audit signal to database
       await logMarketSignal({
         symbol,
         action: signal.action,
-        tier: signal.tier,
-        approved: finalAction === 'LONG' || finalAction === 'SHORT',
-        llm_source: llmSource,
-        confidence: confidenceScore,
+        tier: 2,
+        approved,
+        llm_source: verdict.llmSource,
+        confidence: verdict.confidence,
         indicators: signal.indicators as any,
-        reason: signal.reason,
+        reason: `${signal.reason} | CRO Verdict: ${verdict.verdict} (${verdict.reasoning})`,
       });
 
-      // Execute trade if approved
-      if (finalAction === 'LONG' || finalAction === 'SHORT') {
-        const fullReasoning = llmReasoning || signal.reason;
+      if (approved) {
+        console.log(`[Engine v3.0] 🎯 CRO AUDIT PASSED: Executing ${signal.action} trade!`);
 
         await executeTrade(
           symbol,
-          finalAction,
+          signal.action,
           latestCandle.close,
-          signal.tier,
-          llmSource,
-          signal.indicators.atr,
-          fullReasoning,
-          {
-            rsi: parseFloat(signal.indicators.rsi.toFixed(2)),
-            adx: parseFloat(signal.indicators.adx.toFixed(2)),
-            chop: parseFloat(signal.indicators.chop.toFixed(2)),
-            vwap: parseFloat(signal.indicators.vwap.toFixed(4)),
-            mtfTrend: signal.indicators.mtfTrend,
-            atr: parseFloat(signal.indicators.atr.toFixed(6)),
-            volumeZ: parseFloat(signal.indicators.volumeZ.toFixed(2)),
-            macdHist: signal.indicators.macdHist,
-            price: latestCandle.close,
-            timestamp: new Date().toISOString(),
-          }
+          signal.stopLossPrice,
+          signal.takeProfitPrice,
+          signal.atr,
+          signal.plannedRR,
+          verdict.llmSource,
+          llmReasoning,
+          signal.indicators
         );
         tradeOpened = true;
       } else {
-        console.log(`[Engine] ❌ Trade skipped (${finalAction}). Continuing observation.`);
+        console.log(`[Engine v3.0] ❌ Trade VETOED by CRO (${verdict.reasoning}). Capital protected.`);
       }
 
     } catch (err: any) {
-      console.error(`[Engine] Analysis error: ${err.message}`);
+      console.error(`[Engine v3.0] Analysis error: ${err.message}`);
     } finally {
       analysisInProgress = false;
     }
@@ -262,21 +215,20 @@ async function watchCoin(symbol: string, cycleNumber: number): Promise<'trade_cl
 
   ws.connect();
 
-  // 4. Wait until rotation timeout, trade completion, or stagnation exit
+  // 5. Watch loop
   const watchUntil = Date.now() + CONFIG.WATCH_DURATION_MS;
-  const minWatchUntil = Date.now() + 90000; // Allow at least 90s (1-2 candles) before evaluating stagnation
+  const minWatchUntil = Date.now() + 180000; // Allow at least 3 minutes
 
   while (Date.now() < watchUntil) {
-    if (tradeClosedSignal) { ws.disconnect(); return 'trade_closed'; }
     if (tradeOpened && !hasOpenPosition(symbol)) {
-      console.log(`[Engine] 🏁 Trade for ${symbol} was closed by Guardian. Rotating to next volatile coin...`);
+      console.log(`[Engine v3.0] 🏁 Trade for ${symbol} completed. Rotating to next volatile coin...`);
       ws.disconnect();
       return 'trade_closed';
     }
 
-    // Early momentum rotation: don't sit on a dead/stagnant coin
-    if (!tradeOpened && Date.now() > minWatchUntil && stagnantCandlesCount >= 2) {
-      console.log(`[Engine] ⚡ Early rotation triggered for ${symbol}: 2 consecutive stagnant candles (ADX < 20 / CHOP > 60). Rotating to higher momentum coin...`);
+    // Early exit if 3 consecutive 5m candles in chop
+    if (!tradeOpened && Date.now() > minWatchUntil && stagnantCandlesCount >= 3) {
+      console.log(`[Engine v3.0] ⚡ Early rotation triggered for ${symbol}: 3 consecutive choppy candles. Rotating...`);
       ws.disconnect();
       return 'stagnant_rotated';
     }
@@ -291,97 +243,103 @@ async function watchCoin(symbol: string, cycleNumber: number): Promise<'trade_cl
 async function executeTrade(
   symbol: string,
   side: 'LONG' | 'SHORT',
-  price: number,
-  tier: number,
+  entryPrice: number,
+  stopLossPrice: number,
+  takeProfitPrice: number,
+  atr: number,
+  plannedRR: number,
   llmSource: string,
-  atr = price * 0.015,
-  aiReasoning = '',
+  aiReasoning: string,
   indicatorsAtEntry: Record<string, any> = {}
 ) {
   if (await checkRecentTrade(symbol)) {
-    console.warn(`[Engine] Idempotency guard: trade for ${symbol} placed in last 30s. Skipping.`);
+    console.warn(`[Engine v3.0] Idempotency guard: trade for ${symbol} placed recently. Skipping.`);
     return;
   }
 
   const wallet    = await fetchWalletBalance();
-  const margin    = 1.00; // Flat $1 margin per trade
-  const posSize   = margin * RISK.LEVERAGE;
-  const amount    = posSize / price;
+  const margin    = RISK.MARGIN_PER_TRADE; // Flat $1.00 margin per trade
+  const posSize   = margin * RISK.LEVERAGE; // $3.00 notional at 3x leverage
+  const amount    = posSize / entryPrice;
 
-  // Calculate ATR-based targets
-  const takeProfitPrice = side === 'LONG' ? price + (atr * 3.5) : price - (atr * 3.5);
-  const stopLossPrice   = side === 'LONG' ? price - (atr * 2.0) : price + (atr * 2.0);
-
-  console.log(`\n💰 [Engine] OPENING ${side} on ${symbol}`);
-  console.log(`   Wallet: $${wallet.toFixed(2)} | Margin: $${margin.toFixed(2)} | Pos: $${posSize.toFixed(2)} | Amount: ${amount.toFixed(6)}`);
-  console.log(`   Entry: $${price} | ATR: ${atr.toFixed(4)} | TP: $${takeProfitPrice.toFixed(4)} | SL: $${stopLossPrice.toFixed(4)}`);
-  console.log(`   Tier: ${tier} | LLM: ${llmSource}`);
+  console.log(`\n💰 [Engine v3.0] OPENING ${side} on ${symbol}`);
+  console.log(`   Wallet: $${wallet.toFixed(2)} | Margin: $${margin.toFixed(2)} | Notional: $${posSize.toFixed(2)} (${RISK.LEVERAGE}x)`);
+  console.log(`   Entry: $${entryPrice} | SL: $${stopLossPrice.toFixed(4)} | TP: $${takeProfitPrice.toFixed(4)} | Planned R:R: ${plannedRR}:1`);
 
   if (CONFIG.DRY_RUN) {
-    console.log(`[Engine] [DRY RUN] Simulating ${side} trade for ${symbol}`);
+    console.log(`[Engine v3.0] [DRY RUN] Simulating ${side} trade for ${symbol}`);
     const tradeId = await insertFuturesTrade({
       symbol,
       position_side: side,
       amount,
-      entry_price: price,
+      entry_price: entryPrice,
       status: 'OPEN',
-      tier,
+      tier: 2,
       llm_source: llmSource,
       ai_reasoning: aiReasoning,
       indicators_at_entry: indicatorsAtEntry,
       take_profit_price: takeProfitPrice,
       stop_loss_price: stopLossPrice,
       atr,
-      trailing_stop_pct: RISK.TRAILING_STOP_PCT,
+      trailing_stop_pct: RISK.TRAILING_STOP_ATR_MULT,
     });
 
     registerPosition({
       tradeId,
       symbol,
       positionSide: side,
-      entryPrice: price,
+      entryPrice,
       amount,
       atr,
       takeProfitPrice,
       stopLossPrice,
-      tier,
+      tier: 2,
       llmSource,
     });
 
     await logFocusEvent({
       event_type: 'TRADE_OPENED',
       symbol,
-      tier,
+      tier: 2,
       llm_source: llmSource,
       action: side,
-      indicators: { atr, entry: price },
-      message: `[DRY RUN] ${side} @ $${price} | TP: $${takeProfitPrice.toFixed(4)} | SL: $${stopLossPrice.toFixed(4)}`,
+      indicators: { atr, entry: entryPrice, plannedRR },
+      message: `[DRY RUN v3.0] ${side} @ $${entryPrice} | TP: $${takeProfitPrice.toFixed(4)} | SL: $${stopLossPrice.toFixed(4)} (RR: ${plannedRR}:1)`,
     });
   }
 }
 
-/** Main infinite loop */
+/** Main infinite trading loop */
 export async function runFocusEngine() {
-  console.log('\n🤖 Focus Trading Engine starting...');
+  console.log('\n🤖 Focus Trading Engine v3.0 starting...');
   await syncOpenPositions();
 
+  // Initialize Risk Governor starting balance
+  const initialWallet = await fetchWalletBalance().catch(() => 10.00);
+  riskGovernor.setStartingBalance(initialWallet);
+
   while (true) {
-    // Read current cycle count from engine_status in case user reset it from dashboard!
     const cycleCount = await fetchCurrentEngineCycle();
-    console.log(`\n[Engine] ━━━ Cycle #${cycleCount} ━━━`);
+    console.log(`\n[Engine v3.0] ━━━ Cycle #${cycleCount} ━━━`);
     displayActiveTrades();
+
+    const govStatus = riskGovernor.getStatus();
+    if (govStatus.dailyHalted) {
+      console.warn(`[Engine v3.0] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
+      await sleep(60000);
+      continue;
+    }
 
     try {
       await updateEngineStatus({
-        focused_symbol: 'Scanning market...',
+        focused_symbol: 'Scanning market (v3.0)...',
         cycle_count: cycleCount,
         active_trades_count: getActivePositionsCount(),
       }).catch(() => {});
 
       const coin = await selectHottestCoin();
-      const result = await watchCoin(coin.symbol, cycleCount);
+      const result = await watchCoin(coin.symbol, cycleCount, coin.fundingRate);
 
-      // Increment cycle count in database for next loop
       const nextCycle = cycleCount + 1;
       await updateEngineStatus({
         cycle_count: nextCycle,
@@ -395,11 +353,11 @@ export async function runFocusEngine() {
         message:    `Cycle #${cycleCount} finished on ${coin.symbol}. Result: ${result}. Rotating.`,
       });
 
-      console.log(`\n[Engine] Rotation complete (${result}). Brief pause before next coin...`);
+      console.log(`\n[Engine v3.0] Rotation complete (${result}). Inter-cycle pause...`);
       await sleep(3000);
 
     } catch (err: any) {
-      console.error(`[Engine] Cycle error: ${err.message}`);
+      console.error(`[Engine v3.0] Cycle error: ${err.message}`);
       await logHealth({
         event_type: 'CYCLE_ERROR',
         component:  'focus-engine',

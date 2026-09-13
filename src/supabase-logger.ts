@@ -4,6 +4,7 @@
  */
 import { createClient } from '@supabase/supabase-js';
 import { CONFIG } from './config';
+import { riskGovernor } from './risk-governor';
 
 const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -61,21 +62,27 @@ export async function updateEngineStatus(status: {
     }
     const winRate = totalCount > 0 ? (wins / totalCount) * 100 : 0;
 
+    const govStatus = riskGovernor.getStatus();
+    const mergedIndicators = {
+      ...(status.live_indicators || {}),
+      risk_governor: govStatus,
+    };
+
     const upsertData: Record<string, any> = {
       id: 'primary',
       last_heartbeat: new Date().toISOString(),
       is_running: status.is_running ?? true,
       total_pnl: parseFloat(totalPnl.toFixed(4)),
       win_rate: parseFloat(winRate.toFixed(2)),
-      mode: CONFIG.DRY_RUN ? 'DRY_RUN' : 'LIVE',
+      mode: CONFIG.DRY_RUN ? 'DRY_RUN (v3.0)' : 'LIVE (v3.0)',
       updated_at: new Date().toISOString(),
+      live_indicators: mergedIndicators,
     };
 
     if (status.focused_symbol !== undefined) upsertData.focused_symbol = status.focused_symbol;
     if (status.cycle_count !== undefined) upsertData.cycle_count = status.cycle_count;
     if (status.active_trades_count !== undefined) upsertData.active_trades_count = status.active_trades_count;
     if (status.active_groq_key_index !== undefined) upsertData.active_groq_key_index = status.active_groq_key_index;
-    if (status.live_indicators !== undefined) upsertData.live_indicators = status.live_indicators;
 
     await supabase.from('engine_status').upsert(upsertData);
   } catch (err: any) {
