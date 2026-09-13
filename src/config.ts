@@ -12,13 +12,23 @@ function optional(key: string, fallback: string): string {
 }
 
 export const CONFIG = {
-  VERSION:                   '3.0.0',
+  VERSION:                   '3.1.0',
   PORT:                      parseInt(optional('PORT', '3000')),
   SUPABASE_URL:              required('SUPABASE_URL'),
   SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY'),
   BITGET_API_KEY:            required('BITGET_API_KEY'),
   BITGET_SECRET_KEY:         required('BITGET_SECRET_KEY'),
   BITGET_PASSPHRASE:         required('BITGET_PASSPHRASE'),
+  
+  // Primary LLM: Google Gemini 3.6 Flash (6-key rotation)
+  GEMINI_MODEL:              optional('GEMINI_MODEL', 'gemini-3.6-flash'),
+  GEMINI_KEYS: [
+    process.env.gemini_api_key,  process.env.gemini_api_key2,
+    process.env.gemini_api_key3, process.env.gemini_api_key4,
+    process.env.gemini_api_key5, process.env.gemini_api_key6,
+  ].filter(Boolean) as string[],
+
+  // Secondary Failover LLM: Groq Cloud (5-key rotation)
   GROQ_MODEL:                optional('GROQ_MODEL', 'openai/gpt-oss-20b'),
   GROQ_KEYS: [
     process.env.GROQ_API_KEY,  process.env.GROQ_API_KEY2,
@@ -26,9 +36,11 @@ export const CONFIG = {
     process.env.GROQ_API_KEY5, process.env.GROQ_API_KEY6,
     process.env.GROQ_API_KEY7,
   ].filter(Boolean) as string[],
-  WATCH_DURATION_MS:   parseInt(optional('WATCH_DURATION_MINUTES', '15')) * 60 * 1000,
+
+  WATCH_DURATION_MS:   parseInt(optional('WATCH_DURATION_MINUTES', '3')) * 60 * 1000, // 3-min fast rotation for high opportunity rate
+  MAX_CANDIDATES_POOL: 6, // Top 6 liquid candidates evaluated
   DRY_RUN:             optional('DRY_RUN', 'true') !== 'false',
-  MIN_VOLUME_USDT:     parseFloat(optional('MIN_VOLUME_USDT', '5000000')), // v3: $5M minimum liquidity floor
+  MIN_VOLUME_USDT:     parseFloat(optional('MIN_VOLUME_USDT', '5000000')), // $5M minimum liquidity floor
   CLOUD_API_URL:       optional('CLOUD_API_URL', 'http://localhost:3001'),
   CLOUD_API_KEY:       optional('CLOUD_API_KEY', ''),
 } as const;
@@ -69,13 +81,13 @@ export const SIGNAL = {
   PRIMARY_TIMEFRAME: '15m',    // 15m trend & market structure
   TRIGGER_TIMEFRAME: '5m',     // 5m pullback & rejection trigger
   
-  RSI_PULLBACK_LONG: 44,       // 5m RSI dip zone for pullback long
-  RSI_PULLBACK_SHORT: 56,      // 5m RSI bounce zone for pullback short
+  RSI_PULLBACK_LONG: 48,       // 5m RSI dip zone for pullback long
+  RSI_PULLBACK_SHORT: 52,      // 5m RSI bounce zone for pullback short
   RSI_OVERBOUGHT: 68,          // Overbought threshold (veto long entries)
   RSI_OVERSOLD: 32,            // Oversold threshold (veto short entries)
   
-  ADX_MIN: 22,                 // Minimum directional trend strength
-  CHOP_MAX: 58,                // v3: Tightened from 62 down to 58 (strictly block choppy consolidation)
-  VOLUME_ZSCORE_MIN: 1.2,      // Require real volume expansion (z-score >= 1.2)
-  SIGNAL_COOLDOWN_MS: 15 * 60 * 1000, // 15-min cooldown between signals on the same symbol
+  ADX_MIN: 20,                 // Minimum directional trend strength
+  CHOP_MAX: 58,                // Block choppy consolidation
+  VOLUME_ZSCORE_MIN: 0.8,      // Require volume confirmation (z-score >= 0.8)
+  SIGNAL_COOLDOWN_MS: 3 * 60 * 1000, // 3-min cooldown between signals on the same symbol
 } as const;

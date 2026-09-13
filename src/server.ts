@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { CONFIG } from './config';
 import { getGroqUsageSummary } from './groq-client';
+import { getGeminiTelemetry, pingAllGeminiKeys } from './gemini-client';
 import { fetchWalletBalance, fetchOpenFuturesTrades } from './supabase-logger';
 import { riskGovernor } from './risk-governor';
 
@@ -40,7 +41,7 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
   const server = http.createServer(async (req, res) => {
     // Enable CORS for external dashboard consumption
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
@@ -50,6 +51,43 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
     }
 
     const urlPath = (req.url || '/').split('?')[0];
+
+    // ─── API: On-demand Test All Keys Endpoint ──────────────────────────────────
+    if (urlPath === '/api/test-keys' && req.method === 'POST') {
+      try {
+        console.log('[HTTP Server] 🧪 Running on-demand API key diagnostics...');
+        const results = await pingAllGeminiKeys();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, timestamp: new Date().toISOString(), results }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+        return;
+      }
+    }
+
+    // ─── API: Passive LLM Health Telemetry ──────────────────────────────────────
+    if (urlPath === '/api/llm-health') {
+      try {
+        const payload = {
+          primary: getGeminiTelemetry(),
+          fallback: {
+            provider: 'Groq Cloud',
+            model: CONFIG.GROQ_MODEL,
+            ...getGroqUsageSummary(),
+          },
+          timestamp: new Date().toISOString(),
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(payload, null, 2));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
 
     // ─── Health / Ping Endpoint ────────────────────────────────────────────────
     if (urlPath === '/health' || urlPath === '/api/health') {
@@ -62,7 +100,7 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
           status: 'HEALTHY',
           service: 'focus-trading-engine',
           version: CONFIG.VERSION,
-          mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.0)' : 'LIVE (v3.0)',
+          mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.1)' : 'LIVE (v3.1)',
           uptime_seconds: uptimeSeconds,
           cycle_count: engineCycleCount,
           focused_coin: currentFocusedCoin,
@@ -77,6 +115,7 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
             size: t.amount,
           })),
           risk_governor: riskGovernor.getStatus(),
+          gemini_cluster: getGeminiTelemetry(),
           groq_cloud_llm: getGroqUsageSummary(),
           timestamp: new Date().toISOString(),
         };

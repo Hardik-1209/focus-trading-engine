@@ -97,6 +97,11 @@ body {
   overflow-x: hidden;
   background-color: #020617;
   color: #f8fafc;
+  background-image: 
+    radial-gradient(at 10% 10%, rgba(6, 182, 212, 0.08) 0px, transparent 50%),
+    radial-gradient(at 90% 10%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 90%, rgba(168, 85, 247, 0.05) 0px, transparent 50%);
+  background-attachment: fixed;
 }
 
 /* Touch-friendly min tap target */
@@ -104,4 +109,60 @@ body {
   min-height: 44px;
   min-width: 44px;
 }
+
+/* ─────────────────────────────────────────────
+   GEMINI SCI-FI GLASSMORPHISM (v3.1)
+   ───────────────────────────────────────────── */
+.gemini-glass {
+  background: rgba(10, 15, 30, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+}
+
+.gemini-glass-card {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.75) 0%, rgba(10, 15, 30, 0.85) 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px -3px rgba(6, 182, 212, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gemini-glass-card:hover {
+  border-color: rgba(6, 182, 212, 0.35);
+  box-shadow: 0 14px 30px -5px rgba(0, 0, 0, 0.6), 0 0 25px -2px rgba(6, 182, 212, 0.18);
+}
+
+.gemini-glow-border {
+  position: relative;
+}
+.gemini-glow-border::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.4), rgba(99, 102, 241, 0.3), rgba(236, 72, 153, 0.2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+@keyframes geminiGlowPulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(99, 102, 241, 0.35);
+  }
+}
+
+.animate-gemini-pulse {
+  animation: geminiGlowPulse 3s ease-in-out infinite;
+}
+
 

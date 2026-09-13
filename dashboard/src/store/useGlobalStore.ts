@@ -97,6 +97,20 @@ export interface EngineStatus {
       llmApprovalRate?: number;
       version?: string;
     };
+    gemini_cluster?: {
+      provider: string;
+      model: string;
+      totalKeys: number;
+      activeKeyIndex: number;
+      keys: Array<{
+        index: number;
+        keyMasked: string;
+        status: 'IN_USE' | 'HEALTHY' | 'RATE_LIMITED' | 'ERROR' | 'STANDBY';
+        usage: number;
+        latencyMs: number;
+        lastError?: string | null;
+      }>;
+    };
   };
   updated_at?: string;
 }
@@ -108,7 +122,7 @@ export interface Telemetry {
   websocketConnected: boolean;
 }
 
-export type DashboardPage = 'overview' | 'scanner' | 'trades' | 'brain' | 'ledger' | 'health';
+export type DashboardPage = 'overview' | 'scanner' | 'trades' | 'brain' | 'ledger' | 'apikeys';
 
 interface GlobalStoreState {
   focusLogs: FocusLog[];

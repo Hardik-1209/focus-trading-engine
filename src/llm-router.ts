@@ -1,7 +1,14 @@
 /**
- * llm-router.ts (v3.0)
- * Cloud LLM Router with Adversarial Risk Gate & Telemetry
+ * llm-router.ts (v3.1)
+ * Dual-Engine Cloud LLM Router:
+ * Primary: Google Gemini 3.6 Flash (6-Key Rotation)
+ * Secondary: Groq Cloud Array (5-Key Rotation Failover)
+ * Tertiary: Strict Quantitative Deterministic Fallback
  */
+import {
+  evaluateNarrativeWithGemini,
+  evaluateRiskVerdictWithGemini,
+} from './gemini-client';
 import {
   evaluateNarrativeWithGroq,
   evaluateRiskVerdictWithGroq,
@@ -11,57 +18,90 @@ import {
 } from './groq-client';
 import { riskGovernor } from './risk-governor';
 
+export type LlmProvider = 'gemini' | 'groq' | 'rule-based';
+
 export async function evaluateNarrative(
   symbol: string,
   description: string,
   skillContext = ''
-): Promise<NarrativeScore & { llmSource: 'groq' | 'rule-based' }> {
+): Promise<NarrativeScore & { llmSource: LlmProvider }> {
+  // 1. Primary: Attempt Google Gemini 3.6 Flash
+  try {
+    const result = await evaluateNarrativeWithGemini(symbol, description, skillContext);
+    console.log(`[LLM Router] Narrative for ${symbol} via Gemini 3.6 Flash ✅ (${result.narrative_category}, score: ${result.confidence_score})`);
+    return { ...result, llmSource: 'gemini' };
+  } catch (geminiErr: any) {
+    console.warn(`[LLM Router] Gemini failed (${geminiErr.message}). Failing over to Groq...`);
+  }
+
+  // 2. Secondary: Failover to Groq Array
   try {
     const result = await evaluateNarrativeWithGroq(symbol, description, skillContext);
-    console.log(`[LLM Router] Narrative for ${symbol} via Groq ✅ (${result.narrative_category}, score: ${result.confidence_score})`);
+    console.log(`[LLM Router] Narrative for ${symbol} via Groq Failover ✅ (${result.narrative_category}, score: ${result.confidence_score})`);
     return { ...result, llmSource: 'groq' };
-  } catch (err: any) {
-    console.warn(`[LLM Router] Groq failed: ${err.message}. Using rule-based fallback.`);
-    return {
-      narrative_category: 'MOMENTUM',
-      confidence_score: 50,
-      reasoning: `Rule-based fallback: ${err.message}`,
-      llmSource: 'rule-based',
-    };
+  } catch (groqErr: any) {
+    console.warn(`[LLM Router] Groq also failed (${groqErr.message}). Using rule-based fallback.`);
   }
+
+  // 3. Tertiary Fallback
+  return {
+    narrative_category: 'MOMENTUM',
+    confidence_score: 50,
+    reasoning: 'Rule-based fallback due to LLM timeout',
+    llmSource: 'rule-based',
+  };
 }
 
 export async function evaluateRiskVerdict(
   params: RiskParams
-): Promise<RiskVerdict & { llmSource: 'groq' | 'rule-based' }> {
+): Promise<RiskVerdict & { llmSource: LlmProvider }> {
+  // 1. Primary: Attempt Google Gemini 3.6 Flash
+  try {
+    const result = await evaluateRiskVerdictWithGemini(params);
+    const approved = result.verdict === 'APPROVE';
+    riskGovernor.recordLlmDecision(approved);
+
+    console.log(`[LLM Router v3.1 CRO] ⚡ Verdict via Gemini 3.6 Flash for ${params.symbol}: ${result.verdict} (${result.confidence}/100)`);
+    if (!approved && result.disqualifiers.length > 0) {
+      console.log(`[LLM Router v3.1 CRO] 🛑 Gemini Veto reason: ${result.disqualifiers.join(', ')}`);
+    }
+
+    return { ...result, llmSource: 'gemini' };
+  } catch (geminiErr: any) {
+    console.warn(`[LLM Router] ⚠️ Gemini 3.6 Flash failed (${geminiErr.message}). Failing over to Groq Array...`);
+  }
+
+  // 2. Secondary: Failover to Groq Cloud Array
   try {
     const result = await evaluateRiskVerdictWithGroq(params);
     const approved = result.verdict === 'APPROVE';
     riskGovernor.recordLlmDecision(approved);
 
-    console.log(`[LLM Router v3.0 CRO] Verdict for ${params.symbol}: ${result.verdict} (Confidence: ${result.confidence}/100)`);
+    console.log(`[LLM Router v3.1 CRO] 🛡️ Verdict via Groq Failover for ${params.symbol}: ${result.verdict} (${result.confidence}/100)`);
     if (!approved && result.disqualifiers.length > 0) {
-      console.log(`[LLM Router v3.0 CRO] 🛑 Vetoed due to: ${result.disqualifiers.join(', ')}`);
+      console.log(`[LLM Router v3.1 CRO] 🛑 Groq Veto reason: ${result.disqualifiers.join(', ')}`);
     }
 
     return { ...result, llmSource: 'groq' };
-  } catch (err: any) {
-    console.warn(`[LLM Router] Groq CRO audit failed: ${err.message}. Using strict quantitative fallback.`);
-    const t = params.technicalBlock;
-    const isCleanLong = params.action === 'LONG' && t.rsi5m <= 50 && t.rsi5m >= 38 && t.volumeZ5m >= 1.0 && t.chop15m <= 55 && params.plannedRR >= 1.6;
-    const isCleanShort = params.action === 'SHORT' && t.rsi5m >= 50 && t.rsi5m <= 62 && t.volumeZ5m >= 1.0 && t.chop15m <= 55 && params.plannedRR >= 1.6;
-    const fallbackApproved = isCleanLong || isCleanShort;
-    riskGovernor.recordLlmDecision(fallbackApproved);
-
-    return {
-      verdict: fallbackApproved ? 'APPROVE' : 'VETO',
-      confidence: fallbackApproved ? 75 : 30,
-      disqualifiers: fallbackApproved ? [] : ['RULE_FALLBACK_FAILED'],
-      allocationUsd: fallbackApproved ? 100 : 0,
-      reasoning: `Quantitative fallback: ${fallbackApproved ? 'Passed strict MTF parameters' : 'Failed strict parameters'}`,
-      llmSource: 'rule-based',
-    };
+  } catch (groqErr: any) {
+    console.warn(`[LLM Router] ❌ Both Gemini & Groq failed (${groqErr.message}). Using strict quantitative fallback.`);
   }
+
+  // 3. Tertiary: Strict Quantitative Deterministic Fallback
+  const t = params.technicalBlock;
+  const isCleanLong = params.action === 'LONG' && t.rsi5m <= 52 && t.rsi5m >= 38 && t.volumeZ5m >= 0.8 && t.chop15m <= 58 && params.plannedRR >= 1.6;
+  const isCleanShort = params.action === 'SHORT' && t.rsi5m >= 48 && t.rsi5m <= 62 && t.volumeZ5m >= 0.8 && t.chop15m <= 58 && params.plannedRR >= 1.6;
+  const fallbackApproved = isCleanLong || isCleanShort;
+  riskGovernor.recordLlmDecision(fallbackApproved);
+
+  return {
+    verdict: fallbackApproved ? 'APPROVE' : 'VETO',
+    confidence: fallbackApproved ? 75 : 30,
+    disqualifiers: fallbackApproved ? [] : ['RULE_FALLBACK_FAILED'],
+    allocationUsd: fallbackApproved ? 1.00 : 0,
+    reasoning: `Quantitative rule fallback: ${fallbackApproved ? 'Passed strict MTF parameters' : 'Failed MTF parameters'}`,
+    llmSource: 'rule-based',
+  };
 }
 
 export type { NarrativeScore, RiskVerdict, RiskParams };

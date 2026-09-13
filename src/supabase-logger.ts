@@ -5,8 +5,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { CONFIG } from './config';
 import { riskGovernor } from './risk-governor';
+import { getGeminiTelemetry } from './gemini-client';
 
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(
+  CONFIG.SUPABASE_URL,
+  CONFIG.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: { persistSession: false },
+  }
+);
 
 // ─── System Health ────────────────────────────────────────────────────────────
 
@@ -66,6 +73,7 @@ export async function updateEngineStatus(status: {
     const mergedIndicators = {
       ...(status.live_indicators || {}),
       risk_governor: govStatus,
+      gemini_cluster: getGeminiTelemetry(),
     };
 
     const upsertData: Record<string, any> = {

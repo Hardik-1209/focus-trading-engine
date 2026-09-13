@@ -5,6 +5,7 @@ import { useSupabaseStream } from './hooks/useSupabaseStream';
 import { useBitgetLivePrice } from './hooks/useBitgetLivePrice';
 import { TradeDetailModal } from './components/TradeDetailModal';
 import { ResetSessionModal } from './components/ResetSessionModal';
+import { ApiKeyHealthModal, ApiKeyHealthPanel } from './components/ApiKeyHealthModal';
 import {
   formatUSD,
   formatINR,
@@ -61,6 +62,8 @@ export function OverviewDashboard() {
 
   const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'LONG' | 'SHORT'>('ALL');
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showKeyHealthModal, setShowKeyHealthModal] = useState(false);
+
 
   // Session Filtering: 'active' shows unarchived live trades, specific session ID shows that snapshot, 'all' shows all
   const sessionTrades = trades.filter((t) => {
@@ -175,26 +178,39 @@ export function OverviewDashboard() {
           <div className="flex items-center justify-between gap-2">
             {/* Logo & Subtitle */}
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 ring-1 ring-white/20 shrink-0">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-cyan-400 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-cyan-400/40 shrink-0 animate-gemini-pulse">
                 <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                  <span className="font-black tracking-wider text-sm sm:text-base md:text-lg bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent truncate">
+                  <span className="font-black tracking-wider text-sm sm:text-base md:text-lg bg-gradient-to-r from-white via-cyan-100 to-slate-300 bg-clip-text text-transparent truncate">
                     FOCUS ENGINE
                   </span>
-                  <span className="text-[9px] sm:text-[10px] uppercase font-black tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-gradient-to-r from-cyan-950 to-indigo-950 text-cyan-300 border border-cyan-500/40 shrink-0">
-                    v3.0 QUANT
+                  <span className="text-[9px] sm:text-[10px] uppercase font-black tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-gradient-to-r from-cyan-950 via-indigo-950 to-purple-950 text-cyan-300 border border-cyan-500/40 shrink-0 shadow-sm">
+                    v3.1 QUANT
                   </span>
                 </div>
                 <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium hidden sm:block truncate">
-                  15m Structural Regime · Adversarial CRO Risk Governor · 3x Isolated
+                  15m Structural Regime · Gemini 3.6 Flash Dual-Engine CRO · 3x Isolated
                 </p>
               </div>
             </div>
 
             {/* Header Right Actions */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* Gemini 3.6 Flash Cluster Pill & Modal Trigger */}
+              <button
+                onClick={() => setShowKeyHealthModal(true)}
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl bg-gradient-to-r from-cyan-950/80 via-indigo-950/80 to-purple-950/80 border border-cyan-500/40 hover:border-cyan-300 text-cyan-300 text-[10px] sm:text-[11px] font-bold transition-all shadow-sm shadow-cyan-950/60 cursor-pointer active:scale-95"
+                title="View Gemini & Groq Cluster Health and Key Rotation"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse shrink-0" />
+                <span className="hidden sm:inline">Gemini 3.6</span>
+                <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 text-[9px] font-mono border border-cyan-500/30">
+                  Key #{((liveInd as any)?.gemini_cluster?.activeKeyIndex ?? 1)}
+                </span>
+              </button>
+
               {/* Live Status Pill */}
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold shadow-sm shadow-emerald-950/50">
                 <span className="relative flex h-2 w-2">
@@ -259,6 +275,7 @@ export function OverviewDashboard() {
               { id: 'scanner', label: 'Live Scanner & Regime', icon: Eye },
               { id: 'trades', label: 'Active Positions', icon: Coins, count: openTrades.length },
               { id: 'brain', label: 'Adversarial CRO AI', icon: Bot },
+              { id: 'apikeys', label: 'AI Key Cluster', icon: Cpu },
               { id: 'ledger', label: 'Trade Ledger', icon: BookOpen, count: closedTrades.length },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -1024,7 +1041,7 @@ export function OverviewDashboard() {
                             </td>
                             <td className="py-2.5 text-right pr-2">
                               <span className="text-[11px] font-bold text-cyan-400 opacity-80 group-hover:opacity-100 group-hover:underline flex items-center justify-end gap-1">
-                                <Sparkles className="w-3 h-3" /> Groq AI
+                                <Sparkles className="w-3 h-3" /> AI CRO
                               </span>
                             </td>
                           </tr>
@@ -1038,11 +1055,23 @@ export function OverviewDashboard() {
           </div>
         )}
 
+        {/* ─── TAB: AI KEY CLUSTER & API HEALTH ──────────────────────────────────── */}
+        {activePage === 'apikeys' && (
+          <div className="gemini-glass-card rounded-3xl p-4 sm:p-7 shadow-2xl animate-fadeIn">
+            <ApiKeyHealthPanel isEmbedded={true} />
+          </div>
+        )}
+
         {/* ─── MODALS ───────────────────────────────────────────────────────────── */}
         <TradeDetailModal
           trade={selectedTrade}
           onClose={() => setSelectedTrade(null)}
           inrRate={inrRate}
+        />
+
+        <ApiKeyHealthModal
+          isOpen={showKeyHealthModal}
+          onClose={() => setShowKeyHealthModal(false)}
         />
 
         <ResetSessionModal
@@ -1065,6 +1094,7 @@ export function OverviewDashboard() {
             { id: 'scanner', label: 'Scanner', icon: Eye },
             { id: 'trades', label: 'Trades', icon: Coins, badge: openTrades.length },
             { id: 'brain', label: 'AI Brain', icon: Bot },
+            { id: 'apikeys', label: 'AI Keys', icon: Cpu },
             { id: 'ledger', label: 'Ledger', icon: BookOpen },
           ].map((item) => {
             const Icon = item.icon;
