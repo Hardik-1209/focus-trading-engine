@@ -37,9 +37,7 @@ function scoreCandidate(change24h: number, volumeUsdt: number): number {
 
 let lastSelectedSymbol: string | null = null;
 
-export async function selectHottestCoin(): Promise<CoinCandidate> {
-  console.log('[Coin Selector v3.0] Scanning Bitget futures for liquid, high-momentum candidates...');
-
+export async function getTopCandidateBasket(limit: number = CONFIG.MAX_CANDIDATES_POOL): Promise<CoinCandidate[]> {
   const res = await fetch(`${BITGET_REST}/mix/market/tickers?productType=USDT-FUTURES`, {
     signal: AbortSignal.timeout(10000),
   });
@@ -60,27 +58,22 @@ export async function selectHottestCoin(): Promise<CoinCandidate> {
 
     // Check circuit breaker status
     const governorCheck = riskGovernor.canTradeSymbol(sym);
-    if (!governorCheck.allowed) {
-      continue;
-    }
+    if (!governorCheck.allowed) continue;
 
     const change24h  = parseFloat(t.change24h || '0') * 100;
     const lastPrice  = parseFloat(t.lastPr   || '0');
     const volumeUsdt = parseFloat(t.usdtVolume || t.quoteVolume || '0');
 
-    // 1. Strict Liquidity Floor ($5M USDT min 24h volume)
+    // Strict Liquidity Floor ($5M USDT min 24h volume)
     if (isNaN(change24h) || lastPrice <= 0 || volumeUsdt < CONFIG.MIN_VOLUME_USDT) continue;
-    if (hasOpenPosition(sym)) continue;
 
-    // 2. Microstructure Spread Floor
+    // Microstructure Spread Floor (<0.15%)
     const bidPr = parseFloat(t.bidPr || '0');
     const askPr = parseFloat(t.askPr || '0');
     let spreadPct = 0;
     if (bidPr > 0 && askPr > 0) {
       spreadPct = (askPr - bidPr) / bidPr;
-      if (spreadPct > RISK.MAX_SPREAD_PCT) {
-        continue; // Reject illiquid wide-spread coins
-      }
+      if (spreadPct > RISK.MAX_SPREAD_PCT) continue;
     }
 
     candidates.push({
@@ -95,43 +88,21 @@ export async function selectHottestCoin(): Promise<CoinCandidate> {
   }
 
   if (candidates.length === 0) {
-    throw new Error('No liquid candidates found meeting v3.0 criteria ($5M+ vol, <0.15% spread, circuit breakers clear)');
+    throw new Error('No liquid candidates found meeting liquidity floor');
   }
 
-  // Sort by score descending
+  // Sort descending by momentum score
   candidates.sort((a, b) => b.score - a.score);
+  return candidates.slice(0, limit);
+}
 
-  // Avoid re-selecting the same coin twice in a row if alternatives exist
-  let chosen = candidates[0];
-  if (chosen.symbol === lastSelectedSymbol && candidates.length > 1) {
-    chosen = candidates[1];
-    console.log(`[Coin Selector] Rotating from ${candidates[0].symbol} (just watched) -> ${chosen.symbol}`);
+export async function selectHottestCoin(): Promise<CoinCandidate> {
+  const basket = await getTopCandidateBasket(CONFIG.MAX_CANDIDATES_POOL);
+  let chosen = basket[0];
+  if (chosen.symbol === lastSelectedSymbol && basket.length > 1) {
+    chosen = basket[1];
   }
-
   lastSelectedSymbol = chosen.symbol;
-
-  // Fetch funding rate for chosen candidate
-  try {
-    const frRes = await fetch(`${BITGET_REST}/mix/market/current-fund-rate?symbol=${chosen.symbol}&productType=USDT-FUTURES`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (frRes.ok) {
-      const frJson = await frRes.json() as any;
-      const rate = parseFloat(frJson.data?.[0]?.fundingRate || '0');
-      chosen.fundingRate = rate;
-    }
-  } catch {
-    // Non-critical
-  }
-
-  console.log(
-    `[Coin Selector v3.0] 🎯 Selected: ${chosen.symbol} | ` +
-    `24h: ${chosen.change24h > 0 ? '+' : ''}${chosen.change24h.toFixed(2)}% | ` +
-    `Vol: $${(chosen.volumeUsdt / 1e6).toFixed(1)}M | ` +
-    `Spread: ${(chosen.spreadPct * 100).toFixed(3)}% | ` +
-    `Funding: ${chosen.fundingRate !== undefined ? (chosen.fundingRate * 100).toFixed(4) + '%' : 'N/A'}`
-  );
-
   return chosen;
 }
 
@@ -152,18 +123,30 @@ export async function fetchBootstrapCandles(
   limit = 60,
   granularity: '1m' | '5m' | '15m' = '5m'
 ): Promise<any[]> {
-  const res = await fetch(
-    `${BITGET_REST}/mix/market/history-candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`,
-    { signal: AbortSignal.timeout(10000) }
-  );
-  if (!res.ok) throw new Error(`Candle fetch failed: ${res.status}`);
-  const json = await res.json() as any;
-  return (json.data || []).map((c: string[]) => ({
-    timestamp: parseInt(c[0]),
-    open:  parseFloat(c[1]),
-    high:  parseFloat(c[2]),
-    low:   parseFloat(c[3]),
-    close: parseFloat(c[4]),
-    volume: parseFloat(c[5]),
-  }));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(
+        `${BITGET_REST}/mix/market/history-candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (res.status === 429) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) throw new Error(`Candle fetch failed: ${res.status}`);
+      const json = await res.json() as any;
+      return (json.data || []).map((c: string[]) => ({
+        timestamp: parseInt(c[0]),
+        open:  parseFloat(c[1]),
+        high:  parseFloat(c[2]),
+        low:   parseFloat(c[3]),
+        close: parseFloat(c[4]),
+        volume: parseFloat(c[5]),
+      }));
+    } catch (err: any) {
+      if (attempt === 2) throw err;
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+  return [];
 }

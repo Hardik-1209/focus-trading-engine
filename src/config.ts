@@ -12,7 +12,7 @@ function optional(key: string, fallback: string): string {
 }
 
 export const CONFIG = {
-  VERSION:                   '3.1.0',
+  VERSION:                   '3.2.0',
   PORT:                      parseInt(optional('PORT', '3000')),
   SUPABASE_URL:              required('SUPABASE_URL'),
   SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY'),
@@ -37,24 +37,27 @@ export const CONFIG = {
     process.env.GROQ_API_KEY7,
   ].filter(Boolean) as string[],
 
-  WATCH_DURATION_MS:   parseInt(optional('WATCH_DURATION_MINUTES', '3')) * 60 * 1000, // 3-min fast rotation for high opportunity rate
-  MAX_CANDIDATES_POOL: 6, // Top 6 liquid candidates evaluated
-  DRY_RUN:             optional('DRY_RUN', 'true') !== 'false',
-  MIN_VOLUME_USDT:     parseFloat(optional('MIN_VOLUME_USDT', '5000000')), // $5M minimum liquidity floor
-  CLOUD_API_URL:       optional('CLOUD_API_URL', 'http://localhost:3001'),
-  CLOUD_API_KEY:       optional('CLOUD_API_KEY', ''),
+  WATCH_DURATION_MS:         parseInt(optional('WATCH_DURATION_MINUTES', '3')) * 60 * 1000,
+  SCANNER_INTERVAL_MS:       20 * 1000, // Concurrent basket scan every 20 seconds
+  MAX_CANDIDATES_POOL:       15,        // Scan top 15 liquid candidates simultaneously
+  MAX_CONCURRENT_POSITIONS:  4,         // Max 4 concurrent open trades
+  DRY_RUN:                   optional('DRY_RUN', 'true') !== 'false',
+  MIN_VOLUME_USDT:           parseFloat(optional('MIN_VOLUME_USDT', '5000000')), // $5M minimum liquidity floor
+  CLOUD_API_URL:             optional('CLOUD_API_URL', 'http://localhost:3001'),
+  CLOUD_API_KEY:             optional('CLOUD_API_KEY', ''),
 } as const;
 
 export const RISK = {
-  LEVERAGE: 3,                 // v3: Reduced from 5x to 3x to give room for 1.8x ATR stops
+  LEVERAGE: 3,                 // v3: 3x leverage
   RISK_FACTOR: 0.05,           // 5% margin allocation per trade
   MARGIN_PER_TRADE: 1.00,      // Flat $1.00 margin per trade ($3.00 notional at 3x)
+  MAX_CONCURRENT_POSITIONS: 4, // Max concurrent open positions
   
   // Dynamic ATR Geometry (Triple Barrier)
-  STOP_LOSS_ATR_MULT: 1.8,     // Structural dynamic stop = 1.8 * ATR
-  TAKE_PROFIT_ATR_MULT: 3.2,   // Target reward = 3.2 * ATR (Planned R:R = 1.78:1)
-  BREAKEVEN_ATR_TRIGGER: 1.2,  // Move stop to breakeven + roundtrip fees at +1.2 * ATR profit
-  TRAILING_STOP_ATR_MULT: 1.8, // Trailing stop distance behind peak
+  STOP_LOSS_ATR_MULT: 1.6,     // Structural dynamic stop = 1.6 * ATR
+  TAKE_PROFIT_ATR_MULT: 2.8,   // Target reward = 2.8 * ATR (Planned R:R >= 1.5:1)
+  BREAKEVEN_ATR_TRIGGER: 1.0,  // Move stop to breakeven + roundtrip fees at +1.0 * ATR profit
+  TRAILING_STOP_ATR_MULT: 1.6, // Trailing stop distance behind peak
   
   // Fee Structure
   FEE_RATE_TAKER: 0.0006,      // Bitget taker: 0.06%
@@ -66,9 +69,9 @@ export const RISK = {
   MAX_FUNDING_ABS: 0.0003,     // Alert if 8h funding rate > |0.03%| (crowded squeeze risk)
   
   // Time and Circuit Breaker Stops
-  MIN_HOLD_MINUTES: 5,
-  MAX_HOLD_HOURS: 8,           // v3: Aligned with 15m/5m timeframe
-  STALE_HOLD_HOURS: 2.5,       // Flat exit if no progress after 2.5h
+  MIN_HOLD_MINUTES: 3,
+  MAX_HOLD_HOURS: 4,           // Intraday max hold
+  STALE_HOLD_HOURS: 1.5,       // Flat exit if no progress after 1.5h
   STALE_PROFIT_THRESHOLD: 0.01,// 1% profit threshold
   
   // Risk Governor Safeguards
@@ -81,13 +84,15 @@ export const SIGNAL = {
   PRIMARY_TIMEFRAME: '15m',    // 15m trend & market structure
   TRIGGER_TIMEFRAME: '5m',     // 5m pullback & rejection trigger
   
-  RSI_PULLBACK_LONG: 48,       // 5m RSI dip zone for pullback long
-  RSI_PULLBACK_SHORT: 52,      // 5m RSI bounce zone for pullback short
-  RSI_OVERBOUGHT: 68,          // Overbought threshold (veto long entries)
-  RSI_OVERSOLD: 32,            // Oversold threshold (veto short entries)
+  RSI_PULLBACK_LONG: 54,       // 5m RSI pullback zone for long
+  RSI_PULLBACK_SHORT: 46,      // 5m RSI bounce zone for short
+  RSI_RANGE_BUY: 38,           // Range bottom mean reversion buy
+  RSI_RANGE_SELL: 62,          // Range top mean reversion sell
+  RSI_OVERBOUGHT: 72,          // Overbought threshold (veto long entries)
+  RSI_OVERSOLD: 28,            // Oversold threshold (veto short entries)
   
-  ADX_MIN: 20,                 // Minimum directional trend strength
-  CHOP_MAX: 58,                // Block choppy consolidation
-  VOLUME_ZSCORE_MIN: 0.8,      // Require volume confirmation (z-score >= 0.8)
+  ADX_MIN: 18,                 // Minimum directional trend strength
+  CHOP_MAX: 65,                // Block severe choppy consolidation
+  VOLUME_ZSCORE_MIN: 0.3,      // Volume confirmation floor (z-score >= 0.3)
   SIGNAL_COOLDOWN_MS: 3 * 60 * 1000, // 3-min cooldown between signals on the same symbol
 } as const;

@@ -101,7 +101,7 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
           status: 'HEALTHY',
           service: 'focus-trading-engine',
           version: CONFIG.VERSION,
-          mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.1)' : 'LIVE (v3.1)',
+          mode: CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.2)' : 'LIVE (v3.2)',
           uptime_seconds: uptimeSeconds,
           cycle_count: engineCycleCount || memStatus.cycle_count || 1,
           focused_coin: (currentFocusedCoin && currentFocusedCoin !== 'None') ? currentFocusedCoin : (memStatus.focused_symbol || 'Scanning...'),
