@@ -70,7 +70,7 @@ function parseJsonClean(raw: string): any {
 }
 
 /** Call Gemini 3.6 Flash generateContent with automatic key rotation */
-async function callGeminiWithRotation(system: string, userPrompt: string, timeoutMs = 8000): Promise<any> {
+async function callGeminiWithRotation(system: string, userPrompt: string, timeoutMs = 12000): Promise<any> {
   const maxAttempts = Math.min(CONFIG.GEMINI_KEYS.length, 3);
   let lastError: any = null;
 
@@ -96,7 +96,7 @@ async function callGeminiWithRotation(system: string, userPrompt: string, timeou
           generationConfig: {
             responseMimeType: 'application/json',
             temperature: 0.1,
-            maxOutputTokens: 800,
+            maxOutputTokens: 2500,
           },
         }),
         signal: AbortSignal.timeout(timeoutMs),
