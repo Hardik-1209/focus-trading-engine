@@ -7,6 +7,7 @@ export declare const CONFIG: {
     readonly BITGET_SECRET_KEY: string;
     readonly BITGET_PASSPHRASE: string;
     readonly GEMINI_MODEL: string;
+    readonly GEMINI_FALLBACK_MODEL: string;
     readonly GEMINI_KEYS: string[];
     readonly GROQ_MODEL: string;
     readonly GROQ_KEYS: string[];

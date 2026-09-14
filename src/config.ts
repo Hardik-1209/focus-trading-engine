@@ -20,8 +20,9 @@ export const CONFIG = {
   BITGET_SECRET_KEY:         required('BITGET_SECRET_KEY'),
   BITGET_PASSPHRASE:         required('BITGET_PASSPHRASE'),
   
-  // Primary LLM: Google Gemini 3.6 Flash (6-key rotation)
-  GEMINI_MODEL:              optional('GEMINI_MODEL', 'gemini-3.6-flash'),
+  // Primary LLM: Google Gemini 3.5 Flash Lite (ultra-fast 800ms, high 15 RPM / 1,500 RPD quota across 6 keys)
+  GEMINI_MODEL:              optional('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
+  GEMINI_FALLBACK_MODEL:     optional('GEMINI_FALLBACK_MODEL', 'gemini-flash-lite-latest'),
   GEMINI_KEYS: [
     process.env.gemini_api_key,  process.env.gemini_api_key2,
     process.env.gemini_api_key3, process.env.gemini_api_key4,

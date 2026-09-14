@@ -63,6 +63,13 @@ function getNextGeminiKey() {
         const key = config_1.CONFIG.GEMINI_KEYS[idx];
         const cooldownUntil = geminiRateLimitedKeys.get(key) || 0;
         if (now >= cooldownUntil) {
+            if (geminiRateLimitedKeys.has(key)) {
+                geminiRateLimitedKeys.delete(key);
+                const err = geminiKeyErrors.get(key);
+                if (err && (err.includes('429') || err.includes('Rate limit'))) {
+                    geminiKeyErrors.delete(key);
+                }
+            }
             currentGeminiKeyIndex = (idx + 1) % total;
             return { key, index: idx };
         }
@@ -133,9 +140,52 @@ async function callGeminiWithRotation(system, userPrompt, timeoutMs = 12000) {
             const elapsed = Date.now() - startTime;
             geminiKeyLatency.set(key, elapsed);
             if (res.status === 429) {
-                console.warn(`[Gemini] Key #${index + 1} rate-limited (429). Rotating to next key...`);
-                geminiRateLimitedKeys.set(key, Date.now() + 60000);
-                geminiKeyErrors.set(key, 'Rate limit (429)');
+                let cooldownMs = 30000;
+                try {
+                    const errJson = (await res.json());
+                    const delayStr = errJson?.error?.details?.find((d) => d['@type']?.includes('RetryInfo'))?.retryDelay;
+                    if (delayStr) {
+                        const sec = parseInt(delayStr.replace('s', ''));
+                        if (!isNaN(sec) && sec > 0)
+                            cooldownMs = (sec + 2) * 1000;
+                    }
+                    console.warn(`[Gemini] Key #${index + 1} 429: ${errJson?.error?.message?.slice(0, 100)} (Retry in ${Math.round(cooldownMs / 1000)}s)`);
+                }
+                catch {
+                    console.warn(`[Gemini] Key #${index + 1} rate-limited (429). Rotating to next key...`);
+                }
+                geminiRateLimitedKeys.set(key, Date.now() + cooldownMs);
+                geminiKeyErrors.set(key, `Rate limit (429)`);
+                // Attempt immediate fallback to GEMINI_FALLBACK_MODEL on the same key
+                if (config_1.CONFIG.GEMINI_FALLBACK_MODEL && config_1.CONFIG.GEMINI_FALLBACK_MODEL !== config_1.CONFIG.GEMINI_MODEL) {
+                    try {
+                        console.log(`[Gemini] Trying fallback model ${config_1.CONFIG.GEMINI_FALLBACK_MODEL} on Key #${index + 1}...`);
+                        const fbUrl = `https://generativelanguage.googleapis.com/v1beta/models/${config_1.CONFIG.GEMINI_FALLBACK_MODEL}:generateContent?key=${key}`;
+                        const fbRes = await fetch(fbUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                systemInstruction: { parts: [{ text: system }] },
+                                contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+                                generationConfig: { responseMimeType: 'application/json', temperature: 0.1, maxOutputTokens: 2500 },
+                            }),
+                            signal: AbortSignal.timeout(timeoutMs),
+                        });
+                        if (fbRes.ok) {
+                            const fbJson = (await fbRes.json());
+                            const fbContent = fbJson.candidates?.[0]?.content?.parts?.[0]?.text;
+                            if (fbContent) {
+                                geminiKeyUsage.set(key, (geminiKeyUsage.get(key) || 0) + 1);
+                                geminiKeyErrors.delete(key);
+                                geminiRateLimitedKeys.delete(key);
+                                return parseJsonClean(fbContent);
+                            }
+                        }
+                    }
+                    catch (fbErr) {
+                        console.warn(`[Gemini] Fallback model ${config_1.CONFIG.GEMINI_FALLBACK_MODEL} on Key #${index + 1} failed: ${fbErr.message}`);
+                    }
+                }
                 continue;
             }
             if (!res.ok) {
@@ -366,6 +416,7 @@ async function pingAllGeminiKeys() {
             }
             else {
                 geminiKeyErrors.delete(key);
+                geminiRateLimitedKeys.delete(key);
                 results.push({ index: i, keyMasked: masked, status: 'HEALTHY', latencyMs });
             }
         }
@@ -379,8 +430,18 @@ async function pingAllGeminiKeys() {
 }
 /** Get live telemetry across the 6 Gemini keys without triggering external calls */
 function getGeminiTelemetry() {
+    const now = Date.now();
     const keys = config_1.CONFIG.GEMINI_KEYS.map((key, i) => {
-        const isRateLimited = (geminiRateLimitedKeys.get(key) || 0) > Date.now();
+        const cooldownUntil = geminiRateLimitedKeys.get(key) || 0;
+        const isRateLimited = cooldownUntil > now;
+        // Automatically recover key if cooldown has elapsed
+        if (!isRateLimited && geminiRateLimitedKeys.has(key)) {
+            geminiRateLimitedKeys.delete(key);
+            const err = geminiKeyErrors.get(key);
+            if (err && (err.includes('429') || err.includes('Rate limit'))) {
+                geminiKeyErrors.delete(key);
+            }
+        }
         const lastError = geminiKeyErrors.get(key);
         const usage = geminiKeyUsage.get(key) || 0;
         const latency = geminiKeyLatency.get(key) || 0;
