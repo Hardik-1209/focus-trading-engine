@@ -19,6 +19,7 @@ const groq_client_1 = require("./groq-client");
 const gemini_client_1 = require("./gemini-client");
 const supabase_logger_1 = require("./supabase-logger");
 const risk_governor_1 = require("./risk-governor");
+const version_manager_1 = require("./version-manager");
 let currentFocusedCoin = 'None';
 let engineCycleCount = 0;
 const startTime = Date.now();
@@ -73,6 +74,21 @@ function startHttpServer(port = config_1.CONFIG.PORT) {
                 risk_governor_1.riskGovernor.resetDailyCircuitBreaker();
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true, message: 'Circuit breaker reset successfully. Trading unhalted.' }));
+                return;
+            }
+            catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
+                return;
+            }
+        }
+        // ─── API: Clean Slate Version Reset Endpoint ──────────────────────────────
+        if ((urlPath === '/api/reset-session' || urlPath === '/api/clean-slate') && req.method === 'POST') {
+            try {
+                console.log('[HTTP Server] 🧹 Clean slate data and in-memory reset requested...');
+                const result = await (0, version_manager_1.executeCleanSlateReset)(config_1.CONFIG.VERSION, true);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
                 return;
             }
             catch (err) {

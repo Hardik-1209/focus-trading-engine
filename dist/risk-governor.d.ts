@@ -39,6 +39,10 @@ declare class RiskGovernor {
      */
     resetDailyCircuitBreaker(): void;
     /**
+     * Reset all risk state, counters, streaks, and capital baseline for new version release.
+     */
+    resetForNewVersion(newBalance?: number): void;
+    /**
      * Evaluates whether an asset is permissible to trade.
      * Checks daily portfolio kill switch and symbol-level circuit breakers.
      */

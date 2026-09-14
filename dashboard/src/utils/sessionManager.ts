@@ -82,6 +82,13 @@ export async function resetTradingSession(params: {
       is_active: true,
     });
 
+    // 7. Notify running backend to clear in-memory caches and active positions
+    try {
+      await fetch('/api/reset-session', { method: 'POST' });
+    } catch {
+      // Non-fatal if running outside container
+    }
+
     return { success: true, newSessionId: nextSessionId };
   } catch (err: any) {
     console.error('Failed to reset session:', err);

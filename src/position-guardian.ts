@@ -363,3 +363,12 @@ export async function closePosition(pos: ActivePosition, exitPrice: number, reas
     pos.isClosing = false;
   }
 }
+
+/** Clear all active positions from in-memory map and unsubscribe WS */
+export function clearActivePositionsInMemory(): void {
+  console.log(`[Guardian] 🧹 Clearing ${activePositions.size} in-memory active position(s)...`);
+  activePositions.clear();
+  subscribedSymbols.clear();
+  updateGuardianSubscriptions();
+}
+

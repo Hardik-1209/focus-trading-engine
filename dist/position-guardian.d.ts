@@ -40,4 +40,6 @@ export declare function registerPosition(params: {
 export declare function onTick(tick: TickData): Promise<void>;
 /** Close position in DB, adjust wallet balance, update Risk Governor, and log */
 export declare function closePosition(pos: ActivePosition, exitPrice: number, reason: string): Promise<void>;
+/** Clear all active positions from in-memory map and unsubscribe WS */
+export declare function clearActivePositionsInMemory(): void;
 //# sourceMappingURL=position-guardian.d.ts.map

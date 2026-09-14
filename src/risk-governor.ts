@@ -8,7 +8,7 @@
  * 3. Rolling trade expectancy and fee-drag tracking
  * 4. Adversarial LLM approval rate monitoring (target: 20% - 35%)
  */
-import { RISK } from './config';
+import { RISK, CONFIG } from './config';
 
 export interface SymbolStreak {
   consecutiveLosses: number;
@@ -74,6 +74,21 @@ class RiskGovernor {
     this.dailyRealizedPnl = 0;
     this.dailyResetDate = new Date().getUTCDate();
     console.log('[Risk Governor] 🔄 Daily circuit breaker reset. Trading unhalted.');
+  }
+
+  /**
+   * Reset all risk state, counters, streaks, and capital baseline for new version release.
+   */
+  public resetForNewVersion(newBalance = 10.00) {
+    this.dailyStartingBalance = newBalance;
+    this.dailyRealizedPnl = 0;
+    this.dailyHalted = false;
+    this.recentTrades = [];
+    this.symbolStreaks.clear();
+    this.llmTotal = 0;
+    this.llmApproved = 0;
+    this.dailyResetDate = new Date().getUTCDate();
+    console.log(`[Risk Governor] 🔄 Clean Slate reset for version ${CONFIG.VERSION} with $${newBalance.toFixed(2)} baseline.`);
   }
 
   /**
@@ -221,7 +236,7 @@ class RiskGovernor {
       llmTotalEvaluations: this.llmTotal,
       llmApprovals: this.llmApproved,
       llmApprovalRate: parseFloat(approvalRate.toFixed(1)),
-      version: '3.3.0',
+      version: CONFIG.VERSION,
     };
   }
 }

@@ -50,6 +50,20 @@ class RiskGovernor {
         console.log('[Risk Governor] 🔄 Daily circuit breaker reset. Trading unhalted.');
     }
     /**
+     * Reset all risk state, counters, streaks, and capital baseline for new version release.
+     */
+    resetForNewVersion(newBalance = 10.00) {
+        this.dailyStartingBalance = newBalance;
+        this.dailyRealizedPnl = 0;
+        this.dailyHalted = false;
+        this.recentTrades = [];
+        this.symbolStreaks.clear();
+        this.llmTotal = 0;
+        this.llmApproved = 0;
+        this.dailyResetDate = new Date().getUTCDate();
+        console.log(`[Risk Governor] 🔄 Clean Slate reset for version ${config_1.CONFIG.VERSION} with $${newBalance.toFixed(2)} baseline.`);
+    }
+    /**
      * Evaluates whether an asset is permissible to trade.
      * Checks daily portfolio kill switch and symbol-level circuit breakers.
      */
@@ -177,7 +191,7 @@ class RiskGovernor {
             llmTotalEvaluations: this.llmTotal,
             llmApprovals: this.llmApproved,
             llmApprovalRate: parseFloat(approvalRate.toFixed(1)),
-            version: '3.3.0',
+            version: config_1.CONFIG.VERSION,
         };
     }
 }

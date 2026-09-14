@@ -13,6 +13,7 @@ exports.updatePositionStopLoss = updatePositionStopLoss;
 exports.registerPosition = registerPosition;
 exports.onTick = onTick;
 exports.closePosition = closePosition;
+exports.clearActivePositionsInMemory = clearActivePositionsInMemory;
 /**
  * position-guardian.ts (v3.0)
  * High-precision position guardian with structural ATR stops, dynamic breakeven,
@@ -304,5 +305,12 @@ async function closePosition(pos, exitPrice, reason) {
         console.error(`[Guardian] Error closing position: ${err.message}`);
         pos.isClosing = false;
     }
+}
+/** Clear all active positions from in-memory map and unsubscribe WS */
+function clearActivePositionsInMemory() {
+    console.log(`[Guardian] 🧹 Clearing ${activePositions.size} in-memory active position(s)...`);
+    activePositions.clear();
+    subscribedSymbols.clear();
+    updateGuardianSubscriptions();
 }
 //# sourceMappingURL=position-guardian.js.map

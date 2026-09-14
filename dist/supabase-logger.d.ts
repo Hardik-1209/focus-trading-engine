@@ -6,6 +6,8 @@ export declare function logHealth(params: {
     meta_data?: Record<string, any>;
 }): Promise<void>;
 export declare function getLatestInMemoryStatus(): Record<string, any>;
+/** Reset in-memory telemetry to clean slate values for a new version */
+export declare function resetInMemoryStatus(version?: string): void;
 export declare function updateEngineStatus(status: {
     focused_symbol?: string;
     cycle_count?: number;

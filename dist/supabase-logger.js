@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.logHealth = logHealth;
 exports.getLatestInMemoryStatus = getLatestInMemoryStatus;
+exports.resetInMemoryStatus = resetInMemoryStatus;
 exports.updateEngineStatus = updateEngineStatus;
 exports.logMarketSignal = logMarketSignal;
 exports.fetchWalletBalance = fetchWalletBalance;
@@ -45,10 +46,42 @@ let latestInMemoryStatus = {
     id: 'primary',
     is_running: true,
     last_heartbeat: new Date().toISOString(),
-    live_indicators: {},
+    cycle_count: 1,
+    active_trades_count: 0,
+    win_rate: 0,
+    total_pnl: 0,
+    focused_symbol: 'Scanning...',
+    mode: config_1.CONFIG.DRY_RUN ? `DRY_RUN (v${config_1.CONFIG.VERSION})` : `LIVE (v${config_1.CONFIG.VERSION})`,
+    live_indicators: {
+        regime: 'ACTIVE_CONCURRENT_SCAN',
+        version: config_1.CONFIG.VERSION,
+    },
 };
 function getLatestInMemoryStatus() {
     return latestInMemoryStatus;
+}
+/** Reset in-memory telemetry to clean slate values for a new version */
+function resetInMemoryStatus(version = config_1.CONFIG.VERSION) {
+    latestInMemoryStatus = {
+        id: 'primary',
+        is_running: true,
+        last_heartbeat: new Date().toISOString(),
+        cycle_count: 1,
+        active_trades_count: 0,
+        win_rate: 0,
+        total_pnl: 0,
+        focused_symbol: `Scanning (v${version} Clean Slate)...`,
+        mode: config_1.CONFIG.DRY_RUN ? `DRY_RUN (v${version})` : `LIVE (v${version})`,
+        live_indicators: {
+            price: 0,
+            regime: 'ACTIVE_CONCURRENT_SCAN',
+            timestamp: new Date().toISOString(),
+            version: version,
+            risk_governor: risk_governor_1.riskGovernor.getStatus(),
+            gemini_cluster: (0, gemini_client_1.getGeminiTelemetry)(),
+        },
+    };
+    console.log(`[Supabase Logger] 🧠 In-memory status cache reset to clean slate for v${version}.`);
 }
 async function updateEngineStatus(status) {
     try {
@@ -73,6 +106,7 @@ async function updateEngineStatus(status) {
         const govStatus = risk_governor_1.riskGovernor.getStatus();
         const mergedIndicators = {
             ...(status.live_indicators || {}),
+            version: config_1.CONFIG.VERSION,
             risk_governor: govStatus,
             gemini_cluster: (0, gemini_client_1.getGeminiTelemetry)(),
         };
@@ -82,7 +116,7 @@ async function updateEngineStatus(status) {
             is_running: status.is_running ?? true,
             total_pnl: parseFloat(totalPnl.toFixed(4)),
             win_rate: parseFloat(winRate.toFixed(2)),
-            mode: config_1.CONFIG.DRY_RUN ? 'DRY_RUN (v3.0)' : 'LIVE (v3.0)',
+            mode: config_1.CONFIG.DRY_RUN ? `DRY_RUN (v${config_1.CONFIG.VERSION})` : `LIVE (v${config_1.CONFIG.VERSION})`,
             updated_at: new Date().toISOString(),
             live_indicators: mergedIndicators,
         };
