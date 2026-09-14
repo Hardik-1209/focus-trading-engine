@@ -5,7 +5,7 @@
  */
 import { CONFIG } from './config';
 import type { Candle } from './indicators';
-import type { RiskParams, RiskVerdict, NarrativeScore, AutonomousDecision } from './groq-client';
+import type { RiskParams, RiskVerdict, NarrativeScore, AutonomousDecision, AiPositionReview } from './groq-client';
 
 function fmtPrice(val: number): string {
   if (val >= 1000) return val.toFixed(2);
@@ -187,6 +187,9 @@ export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise
     '- If your balance suffers drawdown, you will be ruined and shut down. Survival demands ironclad risk discipline.\n' +
     '- You NEVER gamble into choppy noise, liquidity traps, or late FOMO momentum.\n' +
     '- You ONLY risk capital when the raw market structure gives you a verified statistical edge (Win Probability >= 60%) with Reward:Risk >= 1.5:1.\n\n' +
+    'MACRO TREND & MOMENTUM LAWS (NON-NEGOTIABLE):\n' +
+    '1. FALLING KNIFE BAN: Never take a LONG on an asset in a macro daily downtrend or negative daily momentum (24h change < -4% or under 1H/30m downtrend). Longing a crashing coin is suicide. In severe downtrends, you may ONLY execute EXECUTE_SHORT on relief rallies into resistance, or STAND_ASIDE.\n' +
+    '2. PARABOLIC SQUEEZE BAN: Never take a SHORT on an asset pumping parabolically (24h change > +25%). You may ONLY execute EXECUTE_LONG on pullbacks, or STAND_ASIDE.\n\n' +
     'DATA HIERARCHY & SOURCE OF TRUTH:\n' +
     '1. RAW CANDLESTICK DATA (15m & 5m OHLCV):\n' +
     '   This is your PRIMARY SOURCE OF TRUTH. You must compute market structure, trend continuity, support/resistance levels, rejection wicks, and volume absorption from these raw candles yourself.\n' +
@@ -221,6 +224,7 @@ export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise
     `Position Sizing: $1.00 margin @ 3x leverage ($3.00 notional)\n` +
     `Asset: ${params.symbol}\n` +
     `Current Price: $${fmtPrice(currentPrice)}\n` +
+    `24h Momentum / Daily Change: ${params.change24h !== undefined ? (params.change24h > 0 ? '+' : '') + params.change24h.toFixed(2) + '%' : 'N/A'} (MACRO 24H BIAS: ${params.change24h !== undefined && params.change24h < -4 ? 'DEEP DOWNTREND / DUMPING (LONGS FORBIDDEN)' : params.change24h !== undefined && params.change24h > 20 ? 'STRONG RUNAWAY PUMP (SHORTS FORBIDDEN)' : 'NEUTRAL'})\n` +
     `8h Funding Rate: ${fundingStr}\n\n` +
     `=== RAW MARKET DATA (PRIMARY SOURCE OF TRUTH) ===\n` +
     (params.candles1h && params.candles1h.length > 0
@@ -250,6 +254,20 @@ export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise
   const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : 'Autonomous market analysis completed.';
   const marketStructureAnalysis = typeof parsed.marketStructureAnalysis === 'string' ? parsed.marketStructureAnalysis : '';
 
+  // Hard-code Macro Downtrend Guard: Never allow Gemini to approve LONG if change24h < -4.0
+  if (params.change24h !== undefined && params.change24h < -4.0 && decision === 'EXECUTE_LONG') {
+    console.warn(`[Gemini Trader] 🛑 Hard Veto: Overriding EXECUTE_LONG because asset is in severe 24h downtrend (${params.change24h.toFixed(1)}% < -4%).`);
+    return {
+      verdict: 'VETO',
+      decision: 'STAND_ASIDE',
+      confidence: 20,
+      winProbability: 25,
+      disqualifiers: ['MACRO_DOWNTREND_FALLING_KNIFE'],
+      reasoning: `Trade vetoed: Asset is dumping heavily (-${Math.abs(params.change24h).toFixed(1)}% 24h change). Longing falling knives violates capital preservation.`,
+      allocationUsd: 0,
+    };
+  }
+
   // Capital ownership filter: Only approve trades where the Autonomous Trader decides to execute AND win probability >= 60%
   const isApproved = (decision === 'EXECUTE_LONG' || decision === 'EXECUTE_SHORT') && winProbability >= 60;
   const verdict = isApproved ? 'APPROVE' : 'VETO';
@@ -266,6 +284,80 @@ export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise
     suggestedTakeProfit: typeof parsed.takeProfitPrice === 'number' && parsed.takeProfitPrice > 0 ? parsed.takeProfitPrice : undefined,
     allocationUsd: isApproved ? 1.00 : 0,
   };
+}
+
+/**
+ * v3.4 Active AI Position Guardian — Gemini 3.6 Flash
+ * Periodically reviews open positions against recent 5m/15m candles
+ * and executes early exits when market structure breaks down.
+ */
+export async function evaluateOpenPositionWithGemini(
+  pos: {
+    symbol: string;
+    positionSide: 'LONG' | 'SHORT';
+    entryPrice: number;
+    stopLossPrice?: number;
+    takeProfitPrice?: number;
+    openedAt: number;
+  },
+  currentPrice: number,
+  candles5m: Candle[],
+  candles15m: Candle[]
+): Promise<AiPositionReview> {
+  const system =
+    'You are the Lead Risk Guardian managing an ACTIVE OPEN POSITION at a high-performance crypto prop desk. ' +
+    'Your personal capital is currently committed in the market ($1.00 margin @ 3x leverage).\n\n' +
+    'YOUR MISSION: ACTIVE CAPITAL DEFENSE.\n' +
+    'Once in a trade, you NEVER sit passively like an amateur and wait to lose your full stop loss if the market turns against you!\n' +
+    'Professional quants cut bad trades early (at -0.5% or -1.0%) the moment market structure breaks down.\n\n' +
+    'EXIT TRIGGERS (When to output "EXIT"):\n' +
+    '- For LONG: Consecutive bearish rejection wicks, lower highs & lower lows forming on 5m, loss of VWAP/support with expanding bearish volume, or momentum rolling over.\n' +
+    '- For SHORT: Consecutive bullish absorption wicks, higher highs forming on 5m, reclaim of VWAP/resistance with expanding bullish volume, or squeeze building against you.\n' +
+    '- If the original trade thesis is INVALIDATED by the latest candles, CUT THE LOSS IMMEDIATELY (action: "EXIT").\n\n' +
+    'TIGHTEN_STOP TRIGGERS (When to output "TIGHTEN_STOP"):\n' +
+    '- The trade is in profit or structure has moved in our favor, and you want to lock in gains or trail risk just behind the latest 5m structural swing high/low.\n' +
+    '- Provide the exact "newStopLoss" price.\n\n' +
+    'HOLD TRIGGERS (When to output "HOLD"):\n' +
+    '- Price action remains healthy, trend continuation is intact, and there is no evidence of structural breakdown.\n\n' +
+    'Return ONLY valid JSON matching this schema:\n' +
+    '{\n' +
+    '  "action": "HOLD" | "EXIT" | "TIGHTEN_STOP",\n' +
+    '  "reason": "1-2 sentences explaining the price action & why you chose HOLD/EXIT/TIGHTEN_STOP",\n' +
+    '  "newStopLoss": number (only when action is TIGHTEN_STOP)\n' +
+    '}';
+
+  const minutesHeld = Math.max(1, Math.round((Date.now() - pos.openedAt) / 60000));
+  const priceDiff = pos.positionSide === 'LONG' ? (currentPrice - pos.entryPrice) : (pos.entryPrice - currentPrice);
+  const pnlPct = (priceDiff / pos.entryPrice) * 100 * 3; // 3x leverage return
+
+  const user =
+    `=== ACTIVE POSITION STATUS ===\n` +
+    `Asset: ${pos.symbol} [${pos.positionSide}]\n` +
+    `Entry Price: $${fmtPrice(pos.entryPrice)}\n` +
+    `Current Price: $${fmtPrice(currentPrice)}\n` +
+    `Unrealized Return: ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% (${priceDiff >= 0 ? 'In Profit' : 'In Drawdown'})\n` +
+    `Time in Trade: ${minutesHeld} minute(s)\n` +
+    `Current Stop Loss: $${pos.stopLossPrice ? fmtPrice(pos.stopLossPrice) : 'None'} | Target: $${pos.takeProfitPrice ? fmtPrice(pos.takeProfitPrice) : 'None'}\n\n` +
+    `=== RECENT 15-MINUTE CANDLES ===\n` +
+    `${formatCandleSequence(candles15m.slice(-6), 'Recent 15m Structure', 6)}\n\n` +
+    `=== RECENT 5-MINUTE CANDLES (LATEST PRICE ACTION) ===\n` +
+    `${formatCandleSequence(candles5m.slice(-8), 'Recent 5m Microstructure', 8)}\n\n` +
+    `=== GUARDIAN DECISION ===\n` +
+    `Inspect the latest candles since entry. Has the trade thesis broken down? Should we CUT LOSS NOW (EXIT), TIGHTEN_STOP, or HOLD?\n` +
+    `Return JSON: {"action":"HOLD"|"EXIT"|"TIGHTEN_STOP","reason":"string","newStopLoss":number}`;
+
+  try {
+    const parsed = await callGeminiWithRotation(system, user, 8000);
+    const action = (parsed.action === 'EXIT' || parsed.action === 'TIGHTEN_STOP' || parsed.action === 'HOLD') ? parsed.action : 'HOLD';
+    return {
+      action,
+      reason: typeof parsed.reason === 'string' ? parsed.reason : 'AI Position Guardian evaluated structure',
+      newStopLoss: typeof parsed.newStopLoss === 'number' && parsed.newStopLoss > 0 ? parsed.newStopLoss : undefined,
+    };
+  } catch (err: any) {
+    console.warn(`[Gemini Guardian] Position review failed for ${pos.symbol}: ${err.message}`);
+    throw err;
+  }
 }
 
 /** Evaluate narrative strength with Gemini 3.6 Flash */

@@ -51,7 +51,8 @@ export interface DetectedSignal {
 export function detectSignal(
   candles5m: Candle[],
   currentPrice: number,
-  candles15m: Candle[] = []
+  candles15m: Candle[] = [],
+  change24h: number = 0
 ): DetectedSignal {
   if (candles5m.length < 20 || candles15m.length < 20) {
     return mkWait('Insufficient historical candles (need >=20 x 5m and 15m)', currentPrice, 'RANGING');
@@ -105,6 +106,67 @@ export function detectSignal(
     currentPrice,
   };
 
+  // Helper to enforce Macro Trend Gates before returning any actionable signal
+  function buildLongSignal(
+    stopLossPrice: number,
+    takeProfitPrice: number,
+    plannedRR: number,
+    reason: string
+  ): DetectedSignal {
+    if (plannedRR < 1.4) {
+      return mkWait(`Planned R:R too low (${plannedRR}:1 < 1.4:1)`, currentPrice, regime, ind);
+    }
+    // FALLING KNIFE / MACRO DOWNTREND VETO
+    if (change24h < -4.0) {
+      return mkWait(
+        `MACRO DOWNTREND GATE: 24h change is ${change24h.toFixed(1)}% (< -4.0%). LONGs strictly prohibited on falling knives.`,
+        currentPrice,
+        regime,
+        ind
+      );
+    }
+    return {
+      action: 'LONG',
+      regime,
+      stopLossPrice,
+      takeProfitPrice,
+      plannedRR,
+      atr: atr5m,
+      indicators: ind,
+      reason,
+    };
+  }
+
+  function buildShortSignal(
+    stopLossPrice: number,
+    takeProfitPrice: number,
+    plannedRR: number,
+    reason: string
+  ): DetectedSignal {
+    if (plannedRR < 1.4) {
+      return mkWait(`Planned R:R too low (${plannedRR}:1 < 1.4:1)`, currentPrice, regime, ind);
+    }
+    // PARABOLIC SQUEEZE VETO
+    if (change24h > 25.0) {
+      return mkWait(
+        `PARABOLIC PUMP GATE: 24h change is +${change24h.toFixed(1)}% (> +25.0%). SHORTs strictly prohibited on runaway runners.`,
+        currentPrice,
+        regime,
+        ind
+      );
+    }
+    return {
+      action: 'SHORT',
+      regime,
+      stopLossPrice,
+      takeProfitPrice,
+      plannedRR,
+      atr: atr5m,
+      indicators: ind,
+      reason,
+    };
+  }
+
   // ─── SETUP 1: 15M/5M TREND PULLBACK CONTINUATION ────────────────────────────
   // Bullish trend: 15m BULL or 5m EMA9 > EMA21, price pulled into EMA21/VWAP (RSI 36-54)
   if (
@@ -119,18 +181,13 @@ export function detectSignal(
     const takeProfitPrice = currentPrice + (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
     const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
 
-    if (plannedRR >= 1.4) {
-      return {
-        action: 'LONG',
-        regime,
-        stopLossPrice,
-        takeProfitPrice,
-        plannedRR,
-        atr: atr5m,
-        indicators: ind,
-        reason: `TREND_PULLBACK_LONG: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)} pulled to EMA21/VWAP, planned RR=${plannedRR}:1`,
-      };
-    }
+    const sig = buildLongSignal(
+      stopLossPrice,
+      takeProfitPrice,
+      plannedRR,
+      `TREND_PULLBACK_LONG: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)} pulled to EMA21/VWAP, planned RR=${plannedRR}:1`
+    );
+    if (sig.action !== 'WAIT') return sig;
   }
 
   // Bearish trend: 15m BEAR or 5m EMA9 < EMA21, price rallied into EMA21/VWAP (RSI 46-64)
@@ -146,24 +203,21 @@ export function detectSignal(
     const takeProfitPrice = currentPrice - (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
     const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
 
-    if (plannedRR >= 1.4) {
-      return {
-        action: 'SHORT',
-        regime,
-        stopLossPrice,
-        takeProfitPrice,
-        plannedRR,
-        atr: atr5m,
-        indicators: ind,
-        reason: `TREND_PULLBACK_SHORT: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)} rallied to EMA21/VWAP, planned RR=${plannedRR}:1`,
-      };
-    }
+    const sig = buildShortSignal(
+      stopLossPrice,
+      takeProfitPrice,
+      plannedRR,
+      `TREND_PULLBACK_SHORT: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)} rallied to EMA21/VWAP, planned RR=${plannedRR}:1`
+    );
+    if (sig.action !== 'WAIT') return sig;
   }
 
   // ─── SETUP 2: RANGE-BOUND MEAN REVERSION (When 15m is RANGING) ──────────────
   if (regime === 'RANGING' || chop15m >= 50) {
     // Range Support Buy: Price near swingLow, RSI oversold <= 38, momentum bottoming
+    // If coin has negative daily momentum (< -1.5%), range support usually fails
     if (
+      change24h >= -1.5 &&
       rsi5m <= SIGNAL.RSI_RANGE_BUY &&
       currentPrice <= (ema21 - atr5m * 0.3) &&
       macdHist > prevHist
@@ -172,22 +226,19 @@ export function detectSignal(
       const takeProfitPrice = currentPrice + (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
       const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
 
-      if (plannedRR >= 1.4) {
-        return {
-          action: 'LONG',
-          regime,
-          stopLossPrice,
-          takeProfitPrice,
-          plannedRR,
-          atr: atr5m,
-          indicators: ind,
-          reason: `RANGE_SUPPORT_LONG: Range mean-reversion, RSI=${rsi5m.toFixed(1)} at support, planned RR=${plannedRR}:1`,
-        };
-      }
+      const sig = buildLongSignal(
+        stopLossPrice,
+        takeProfitPrice,
+        plannedRR,
+        `RANGE_SUPPORT_LONG: Range mean-reversion, RSI=${rsi5m.toFixed(1)} at support, planned RR=${plannedRR}:1`
+      );
+      if (sig.action !== 'WAIT') return sig;
     }
 
     // Range Resistance Short: Price near swingHigh, RSI overbought >= 62, momentum topping
+    // If coin has strong daily momentum (> 15%), range resistance usually breaks out upward
     if (
+      change24h <= 15.0 &&
       rsi5m >= SIGNAL.RSI_RANGE_SELL &&
       currentPrice >= (ema21 + atr5m * 0.3) &&
       macdHist < prevHist
@@ -196,18 +247,13 @@ export function detectSignal(
       const takeProfitPrice = currentPrice - (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
       const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
 
-      if (plannedRR >= 1.4) {
-        return {
-          action: 'SHORT',
-          regime,
-          stopLossPrice,
-          takeProfitPrice,
-          plannedRR,
-          atr: atr5m,
-          indicators: ind,
-          reason: `RANGE_RESISTANCE_SHORT: Range mean-reversion, RSI=${rsi5m.toFixed(1)} at resistance, planned RR=${plannedRR}:1`,
-        };
-      }
+      const sig = buildShortSignal(
+        stopLossPrice,
+        takeProfitPrice,
+        plannedRR,
+        `RANGE_RESISTANCE_SHORT: Range mean-reversion, RSI=${rsi5m.toFixed(1)} at resistance, planned RR=${plannedRR}:1`
+      );
+      if (sig.action !== 'WAIT') return sig;
     }
   }
 
@@ -226,18 +272,13 @@ export function detectSignal(
     const takeProfitPrice = currentPrice + (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
     const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
 
-    if (plannedRR >= 1.4) {
-      return {
-        action: 'LONG',
-        regime,
-        stopLossPrice,
-        takeProfitPrice,
-        plannedRR,
-        atr: atr5m,
-        indicators: ind,
-        reason: `MOMENTUM_BREAKOUT_LONG: 5m EMA9>21 + VWAP reclaim + VolZ=${volumeZ5m.toFixed(2)}, planned RR=${plannedRR}:1`,
-      };
-    }
+    const sig = buildLongSignal(
+      stopLossPrice,
+      takeProfitPrice,
+      plannedRR,
+      `MOMENTUM_BREAKOUT_LONG: 5m EMA9>21 + VWAP reclaim + VolZ=${volumeZ5m.toFixed(2)}, planned RR=${plannedRR}:1`
+    );
+    if (sig.action !== 'WAIT') return sig;
   }
 
   // Bearish expansion: EMA9 < EMA21, price below VWAP, RSI 32-52, MACD negative expansion
@@ -254,18 +295,13 @@ export function detectSignal(
     const takeProfitPrice = currentPrice - (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
     const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
 
-    if (plannedRR >= 1.4) {
-      return {
-        action: 'SHORT',
-        regime,
-        stopLossPrice,
-        takeProfitPrice,
-        plannedRR,
-        atr: atr5m,
-        indicators: ind,
-        reason: `MOMENTUM_BREAKOUT_SHORT: 5m EMA9<21 + VWAP rejection + VolZ=${volumeZ5m.toFixed(2)}, planned RR=${plannedRR}:1`,
-      };
-    }
+    const sig = buildShortSignal(
+      stopLossPrice,
+      takeProfitPrice,
+      plannedRR,
+      `MOMENTUM_BREAKOUT_SHORT: 5m EMA9<21 + VWAP rejection + VolZ=${volumeZ5m.toFixed(2)}, planned RR=${plannedRR}:1`
+    );
+    if (sig.action !== 'WAIT') return sig;
   }
 
   return mkWait(

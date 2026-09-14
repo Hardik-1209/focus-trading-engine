@@ -17,12 +17,18 @@ export interface RiskVerdict {
     allocationUsd: number;
     disqualifiers: string[];
 }
+export interface AiPositionReview {
+    action: 'HOLD' | 'EXIT' | 'TIGHTEN_STOP';
+    reason: string;
+    newStopLoss?: number;
+}
 export interface RiskParams {
     symbol: string;
     action: 'LONG' | 'SHORT';
     plannedRR: number;
     stopLossPrice: number;
     takeProfitPrice: number;
+    change24h?: number;
     fundingRate?: number;
     candles1h?: Candle[];
     candles30m?: Candle[];
@@ -49,6 +55,17 @@ export declare function evaluateNarrativeWithGroq(symbol: string, description: s
  * Target approval rate: 20% - 35%.
  */
 export declare function evaluateRiskVerdictWithGroq(params: RiskParams): Promise<RiskVerdict>;
+/**
+ * Failover Open Position Review with Groq
+ */
+export declare function evaluateOpenPositionWithGroq(pos: {
+    symbol: string;
+    positionSide: 'LONG' | 'SHORT';
+    entryPrice: number;
+    stopLossPrice?: number;
+    takeProfitPrice?: number;
+    openedAt: number;
+}, currentPrice: number, candles5m: Candle[], candles15m: Candle[]): Promise<AiPositionReview>;
 export declare function getActiveGroqKeyIndex(): number;
 export declare function getGroqUsageSummary(): {
     keyUsage: {

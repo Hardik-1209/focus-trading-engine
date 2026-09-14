@@ -1,5 +1,5 @@
 import type { Candle } from './indicators';
-import type { RiskParams, RiskVerdict, NarrativeScore } from './groq-client';
+import type { RiskParams, RiskVerdict, NarrativeScore, AiPositionReview } from './groq-client';
 /**
  * Serializes raw Candle array into a structured tabular representation for LLM analysis.
  * Chronological order: oldest candle is row 1, newest candle is at bottom marked (CURRENT).
@@ -16,6 +16,19 @@ export declare function getNextGeminiKey(): {
  * and autonomous decision authority (direction, win probability, dynamic structural SL/TP).
  */
 export declare function evaluateRiskVerdictWithGemini(params: RiskParams): Promise<RiskVerdict>;
+/**
+ * v3.4 Active AI Position Guardian — Gemini 3.6 Flash
+ * Periodically reviews open positions against recent 5m/15m candles
+ * and executes early exits when market structure breaks down.
+ */
+export declare function evaluateOpenPositionWithGemini(pos: {
+    symbol: string;
+    positionSide: 'LONG' | 'SHORT';
+    entryPrice: number;
+    stopLossPrice?: number;
+    takeProfitPrice?: number;
+    openedAt: number;
+}, currentPrice: number, candles5m: Candle[], candles15m: Candle[]): Promise<AiPositionReview>;
 /** Evaluate narrative strength with Gemini 3.6 Flash */
 export declare function evaluateNarrativeWithGemini(symbol: string, description: string, skillContext?: string): Promise<NarrativeScore>;
 /**

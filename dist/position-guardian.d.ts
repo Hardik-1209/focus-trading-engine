@@ -21,6 +21,8 @@ export declare function syncOpenPositions(): Promise<void>;
 export declare function hasOpenPosition(symbol: string): boolean;
 export declare function getOpenPosition(symbol: string): ActivePosition | undefined;
 export declare function getActivePositionsCount(): number;
+export declare function getActivePositionsList(): ActivePosition[];
+export declare function updatePositionStopLoss(symbol: string, newStopLoss: number): boolean;
 export declare function registerPosition(params: {
     tradeId: string;
     symbol: string;

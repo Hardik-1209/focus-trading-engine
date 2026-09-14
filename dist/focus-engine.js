@@ -125,22 +125,23 @@ async function evaluateCandidate(candidate, cycleNumber) {
             return false;
         const latestCandle = c5m[c5m.length - 1];
         const currentPrice = latestCandle.close;
-        // 3. Quantitative Tri-Setup Signal Detection
-        const signal = (0, signal_detector_1.detectSignal)(c5m, currentPrice, c15m);
+        // 3. Quantitative Tri-Setup Signal Detection (with Macro 24h Trend Gate)
+        const signal = (0, signal_detector_1.detectSignal)(c5m, currentPrice, c15m, candidate.change24h);
         if (signal.action === 'WAIT') {
             return false;
         }
-        console.log(`\n[Engine v3.3] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1`);
-        console.log(`[Engine v3.3] Setup: ${signal.reason}`);
+        console.log(`\n[Engine v3.4] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1 | 24h: ${candidate.change24h > 0 ? '+' : ''}${candidate.change24h.toFixed(1)}%`);
+        console.log(`[Engine v3.4] Setup: ${signal.reason}`);
         lastSignalTime.set(symbol, Date.now());
         // 4. Autonomous Senior Quant Trader Evaluation via Google Gemini 3.6 Flash
-        console.log(`[Engine v3.3] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader (1H, 30m, 15m, 5m MTF)...`);
+        console.log(`[Engine v3.4] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader (1H, 30m, 15m, 5m MTF)...`);
         const verdict = await (0, llm_router_1.evaluateRiskVerdict)({
             symbol,
             action: signal.action,
             plannedRR: signal.plannedRR,
             stopLossPrice: signal.stopLossPrice,
             takeProfitPrice: signal.takeProfitPrice,
+            change24h: candidate.change24h,
             fundingRate: candidate.fundingRate,
             candles1h: c1h,
             candles30m: c30m,
@@ -255,11 +256,65 @@ function startPositionGuardianWatchdog() {
         }
     }, 5000);
 }
+let isAiGuardianRunning = false;
+/**
+ * v3.4 Active AI Position Guardian Loop
+ * Periodically reviews open positions every 60s against latest 5m/15m candles.
+ * If market structure breaks down, executes AI_EARLY_EXIT to cut losses early
+ * instead of passively waiting for a full stop loss hit.
+ */
+function startAiPositionGuardianLoop() {
+    setInterval(async () => {
+        if (isAiGuardianRunning)
+            return;
+        const positions = (0, position_guardian_1.getActivePositionsList)();
+        if (positions.length === 0)
+            return;
+        isAiGuardianRunning = true;
+        try {
+            for (const pos of positions) {
+                if (pos.isClosing)
+                    continue;
+                const ageSec = (Date.now() - pos.openedAt) / 1000;
+                // Allow trade at least 90s to develop before AI structural check
+                if (ageSec < 90)
+                    continue;
+                try {
+                    const { c5m, c15m } = await getCandlesWithCache(pos.symbol);
+                    if (c5m.length < 10 || c15m.length < 10)
+                        continue;
+                    const latestCandle = c5m[c5m.length - 1];
+                    const currentPrice = latestCandle.close;
+                    console.log(`[AI Guardian v3.4] 🧠 Reviewing open position ${pos.symbol} [${pos.positionSide}] (Age: ${Math.round(ageSec / 60)}m, Price: $${currentPrice})...`);
+                    const review = await (0, llm_router_1.evaluateOpenPosition)(pos, currentPrice, c5m, c15m);
+                    console.log(`[AI Guardian v3.4] ➤ ${pos.symbol} Review Verdict: ${review.action} [${review.llmSource}] | Reason: ${review.reason}`);
+                    if (review.action === 'EXIT') {
+                        await (0, position_guardian_1.closePosition)(pos, currentPrice, `AI_EARLY_EXIT: [${review.llmSource}] ${review.reason}`);
+                    }
+                    else if (review.action === 'TIGHTEN_STOP' && review.newStopLoss) {
+                        (0, position_guardian_1.updatePositionStopLoss)(pos.symbol, review.newStopLoss);
+                    }
+                }
+                catch (posErr) {
+                    console.warn(`[AI Guardian] Error reviewing ${pos.symbol}: ${posErr.message}`);
+                }
+                await sleep(600); // polite spacing between position evaluations
+            }
+        }
+        catch (err) {
+            console.warn(`[AI Guardian] Loop error: ${err.message}`);
+        }
+        finally {
+            isAiGuardianRunning = false;
+        }
+    }, 60000);
+}
 /** Main High-Cadence Concurrent Trading Loop */
 async function runFocusEngine() {
-    console.log('\n🤖 Focus Trading Engine v3.3 starting (Autonomous Senior Quant Trader + Raw Candles)...');
+    console.log('\n🤖 Focus Trading Engine v3.4 starting (Autonomous Quant Trader + Active AI Guardian + Macro Protection)...');
     await (0, position_guardian_1.syncOpenPositions)();
     startPositionGuardianWatchdog();
+    startAiPositionGuardianLoop();
     // Initialize Risk Governor starting balance and reset circuit breaker on deployment
     const initialWallet = await (0, supabase_logger_1.fetchWalletBalance)().catch(() => 10.00);
     risk_governor_1.riskGovernor.setStartingBalance(initialWallet);

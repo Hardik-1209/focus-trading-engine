@@ -163,6 +163,30 @@ export function getActivePositionsCount(): number {
   return activePositions.size;
 }
 
+export function getActivePositionsList(): ActivePosition[] {
+  return Array.from(activePositions.values());
+}
+
+export function updatePositionStopLoss(symbol: string, newStopLoss: number): boolean {
+  const pos = activePositions.get(symbol);
+  if (!pos || pos.isClosing) return false;
+  // Only allow tightening (for LONG: higher SL; for SHORT: lower SL)
+  if (pos.positionSide === 'LONG') {
+    if (!pos.stopLossPrice || newStopLoss > pos.stopLossPrice) {
+      pos.stopLossPrice = newStopLoss;
+      console.log(`[Guardian v3.4] 🛡️ Tightened Stop Loss for ${symbol} LONG -> $${newStopLoss.toFixed(4)}`);
+      return true;
+    }
+  } else if (pos.positionSide === 'SHORT') {
+    if (!pos.stopLossPrice || newStopLoss < pos.stopLossPrice) {
+      pos.stopLossPrice = newStopLoss;
+      console.log(`[Guardian v3.4] 🛡️ Tightened Stop Loss for ${symbol} SHORT -> $${newStopLoss.toFixed(4)}`);
+      return true;
+    }
+  }
+  return false;
+}
+
 export function registerPosition(params: {
   tradeId:          string;
   symbol:           string;

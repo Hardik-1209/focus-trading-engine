@@ -16,7 +16,7 @@ function optional(key, fallback) {
     return process.env[key] || fallback;
 }
 exports.CONFIG = {
-    VERSION: '3.3.0',
+    VERSION: '3.4.0',
     PORT: parseInt(optional('PORT', '3000')),
     SUPABASE_URL: required('SUPABASE_URL'),
     SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY'),

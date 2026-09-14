@@ -1,5 +1,5 @@
 export declare const CONFIG: {
-    readonly VERSION: "3.3.0";
+    readonly VERSION: "3.4.0";
     readonly PORT: number;
     readonly SUPABASE_URL: string;
     readonly SUPABASE_SERVICE_ROLE_KEY: string;

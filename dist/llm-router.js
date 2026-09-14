@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateNarrative = evaluateNarrative;
 exports.evaluateRiskVerdict = evaluateRiskVerdict;
+exports.evaluateOpenPosition = evaluateOpenPosition;
 /**
  * llm-router.ts (v3.1)
  * Dual-Engine Cloud LLM Router:
@@ -85,6 +86,34 @@ async function evaluateRiskVerdict(params) {
         disqualifiers: fallbackApproved ? [] : ['RULE_FALLBACK_FAILED'],
         allocationUsd: fallbackApproved ? 1.00 : 0,
         reasoning: `Quantitative rule fallback: ${fallbackApproved ? 'Passed strict MTF parameters' : 'Failed MTF parameters'}`,
+        llmSource: 'rule-based',
+    };
+}
+/**
+ * Dual-Engine AI Open Position Review
+ * Primary: Google Gemini 3.6 Flash
+ * Secondary Failover: Groq Cloud
+ */
+async function evaluateOpenPosition(pos, currentPrice, candles5m, candles15m) {
+    // 1. Primary: Google Gemini 3.6 Flash
+    try {
+        const res = await (0, gemini_client_1.evaluateOpenPositionWithGemini)(pos, currentPrice, candles5m, candles15m);
+        return { ...res, llmSource: 'gemini' };
+    }
+    catch (err) {
+        console.warn(`[LLM Router] Gemini Position Review failed for ${pos.symbol} (${err.message}). Failing over to Groq...`);
+    }
+    // 2. Secondary: Groq Cloud
+    try {
+        const res = await (0, groq_client_1.evaluateOpenPositionWithGroq)(pos, currentPrice, candles5m, candles15m);
+        return { ...res, llmSource: 'groq' };
+    }
+    catch (err) {
+        console.warn(`[LLM Router] Groq Position Review failed for ${pos.symbol} (${err.message}). Falling back to HOLD.`);
+    }
+    return {
+        action: 'HOLD',
+        reason: 'Failover default: Maintaining position until tick trigger',
         llmSource: 'rule-based',
     };
 }

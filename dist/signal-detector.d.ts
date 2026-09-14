@@ -23,5 +23,5 @@ export interface DetectedSignal {
     };
     reason: string;
 }
-export declare function detectSignal(candles5m: Candle[], currentPrice: number, candles15m?: Candle[]): DetectedSignal;
+export declare function detectSignal(candles5m: Candle[], currentPrice: number, candles15m?: Candle[], change24h?: number): DetectedSignal;
 //# sourceMappingURL=signal-detector.d.ts.map

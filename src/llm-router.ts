@@ -8,14 +8,18 @@
 import {
   evaluateNarrativeWithGemini,
   evaluateRiskVerdictWithGemini,
+  evaluateOpenPositionWithGemini,
 } from './gemini-client';
 import {
   evaluateNarrativeWithGroq,
   evaluateRiskVerdictWithGroq,
+  evaluateOpenPositionWithGroq,
   NarrativeScore,
   RiskVerdict,
   RiskParams,
+  AiPositionReview,
 } from './groq-client';
+import type { Candle } from './indicators';
 import { riskGovernor } from './risk-governor';
 
 export type LlmProvider = 'gemini' | 'groq' | 'rule-based';
@@ -109,4 +113,45 @@ export async function evaluateRiskVerdict(
   };
 }
 
-export type { NarrativeScore, RiskVerdict, RiskParams };
+/**
+ * Dual-Engine AI Open Position Review
+ * Primary: Google Gemini 3.6 Flash
+ * Secondary Failover: Groq Cloud
+ */
+export async function evaluateOpenPosition(
+  pos: {
+    symbol: string;
+    positionSide: 'LONG' | 'SHORT';
+    entryPrice: number;
+    stopLossPrice?: number;
+    takeProfitPrice?: number;
+    openedAt: number;
+  },
+  currentPrice: number,
+  candles5m: Candle[],
+  candles15m: Candle[]
+): Promise<AiPositionReview & { llmSource: LlmProvider }> {
+  // 1. Primary: Google Gemini 3.6 Flash
+  try {
+    const res = await evaluateOpenPositionWithGemini(pos, currentPrice, candles5m, candles15m);
+    return { ...res, llmSource: 'gemini' };
+  } catch (err: any) {
+    console.warn(`[LLM Router] Gemini Position Review failed for ${pos.symbol} (${err.message}). Failing over to Groq...`);
+  }
+
+  // 2. Secondary: Groq Cloud
+  try {
+    const res = await evaluateOpenPositionWithGroq(pos, currentPrice, candles5m, candles15m);
+    return { ...res, llmSource: 'groq' };
+  } catch (err: any) {
+    console.warn(`[LLM Router] Groq Position Review failed for ${pos.symbol} (${err.message}). Falling back to HOLD.`);
+  }
+
+  return {
+    action: 'HOLD',
+    reason: 'Failover default: Maintaining position until tick trigger',
+    llmSource: 'rule-based',
+  };
+}
+
+export type { NarrativeScore, RiskVerdict, RiskParams, AiPositionReview };

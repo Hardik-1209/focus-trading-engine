@@ -32,7 +32,7 @@ async function setRenderEnvAndDeploy() {
     { key: 'GROQ_API_KEY5', value: process.env.GROQ_API_KEY5 || '' },
     { key: 'WATCH_DURATION_MINUTES', value: '3' },
     { key: 'DRY_RUN', value: 'true' },
-    { key: 'MIN_VOLUME_USDT', value: '500000' },
+    { key: 'MIN_VOLUME_USDT', value: '15000000' },
     { key: 'VITE_SUPABASE_URL', value: process.env.SUPABASE_URL || '' },
     { key: 'VITE_SUPABASE_ANON_KEY', value: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhucnVxYWhuY2RuaXd5aXJnb3JoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTU3NzksImV4cCI6MjA5NTEzMTc3OX0.q8Ujxv8I9QFYB2ibvvzgEiORtblb8btdNya6GEJm6eg' },
   ];

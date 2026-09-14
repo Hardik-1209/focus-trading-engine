@@ -8,6 +8,8 @@ exports.syncOpenPositions = syncOpenPositions;
 exports.hasOpenPosition = hasOpenPosition;
 exports.getOpenPosition = getOpenPosition;
 exports.getActivePositionsCount = getActivePositionsCount;
+exports.getActivePositionsList = getActivePositionsList;
+exports.updatePositionStopLoss = updatePositionStopLoss;
 exports.registerPosition = registerPosition;
 exports.onTick = onTick;
 exports.closePosition = closePosition;
@@ -139,6 +141,30 @@ function getOpenPosition(symbol) {
 }
 function getActivePositionsCount() {
     return activePositions.size;
+}
+function getActivePositionsList() {
+    return Array.from(activePositions.values());
+}
+function updatePositionStopLoss(symbol, newStopLoss) {
+    const pos = activePositions.get(symbol);
+    if (!pos || pos.isClosing)
+        return false;
+    // Only allow tightening (for LONG: higher SL; for SHORT: lower SL)
+    if (pos.positionSide === 'LONG') {
+        if (!pos.stopLossPrice || newStopLoss > pos.stopLossPrice) {
+            pos.stopLossPrice = newStopLoss;
+            console.log(`[Guardian v3.4] 🛡️ Tightened Stop Loss for ${symbol} LONG -> $${newStopLoss.toFixed(4)}`);
+            return true;
+        }
+    }
+    else if (pos.positionSide === 'SHORT') {
+        if (!pos.stopLossPrice || newStopLoss < pos.stopLossPrice) {
+            pos.stopLossPrice = newStopLoss;
+            console.log(`[Guardian v3.4] 🛡️ Tightened Stop Loss for ${symbol} SHORT -> $${newStopLoss.toFixed(4)}`);
+            return true;
+        }
+    }
+    return false;
 }
 function registerPosition(params) {
     activePositions.set(params.symbol, {
