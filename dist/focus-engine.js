@@ -22,6 +22,7 @@ const position_guardian_1 = require("./position-guardian");
 const supabase_logger_1 = require("./supabase-logger");
 const server_1 = require("./server");
 const config_1 = require("./config");
+const indicators_1 = require("./indicators");
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const lastSignalTime = new Map();
 let analysisInProgress = false;
@@ -29,18 +30,28 @@ const candleCache = new Map();
 async function getCandlesWithCache(symbol) {
     const cached = candleCache.get(symbol);
     if (cached && (Date.now() - cached.timestamp < 25000)) {
-        return { c5m: cached.candles5m, c15m: cached.candles15m };
+        return {
+            c5m: cached.candles5m,
+            c15m: cached.candles15m,
+            c30m: cached.candles30m,
+            c1h: cached.candles1h,
+        };
     }
-    const [c5m, c15m] = await Promise.all([
-        (0, coin_selector_1.fetchBootstrapCandles)(symbol, 60, '5m'),
+    const [c5m, c15m, native1h] = await Promise.all([
+        (0, coin_selector_1.fetchBootstrapCandles)(symbol, 40, '5m'),
         (0, coin_selector_1.fetchBootstrapCandles)(symbol, 40, '15m'),
+        (0, coin_selector_1.fetchBootstrapCandles)(symbol, 12, '1H').catch(() => []),
     ]);
+    const c30m = (0, indicators_1.aggregateCandles)(c15m, 30);
+    const c1h = native1h && native1h.length >= 6 ? native1h : (0, indicators_1.aggregateCandles)(c15m, 60);
     candleCache.set(symbol, {
         timestamp: Date.now(),
         candles5m: c5m,
         candles15m: c15m,
+        candles30m: c30m,
+        candles1h: c1h,
     });
-    return { c5m, c15m };
+    return { c5m, c15m, c30m, c1h };
 }
 /** Execute trade in database, register in Position Guardian, and log */
 async function executeTrade(symbol, side, entryPrice, stopLossPrice, takeProfitPrice, atr, plannedRR, llmSource, aiReasoning, indicatorsAtEntry = {}) {
@@ -108,8 +119,8 @@ async function evaluateCandidate(candidate, cycleNumber) {
     if (Date.now() - lastSig < config_1.SIGNAL.SIGNAL_COOLDOWN_MS)
         return false;
     try {
-        // 2. Fetch candles
-        const { c5m, c15m } = await getCandlesWithCache(symbol);
+        // 2. Fetch candles across intraday timeframes (1H, 30m, 15m, 5m)
+        const { c5m, c15m, c30m, c1h } = await getCandlesWithCache(symbol);
         if (c5m.length < 20 || c15m.length < 20)
             return false;
         const latestCandle = c5m[c5m.length - 1];
@@ -119,11 +130,11 @@ async function evaluateCandidate(candidate, cycleNumber) {
         if (signal.action === 'WAIT') {
             return false;
         }
-        console.log(`\n[Engine v3.2] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1`);
-        console.log(`[Engine v3.2] Setup: ${signal.reason}`);
+        console.log(`\n[Engine v3.3] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1`);
+        console.log(`[Engine v3.3] Setup: ${signal.reason}`);
         lastSignalTime.set(symbol, Date.now());
         // 4. Autonomous Senior Quant Trader Evaluation via Google Gemini 3.6 Flash
-        console.log(`[Engine v3.3] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader...`);
+        console.log(`[Engine v3.3] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader (1H, 30m, 15m, 5m MTF)...`);
         const verdict = await (0, llm_router_1.evaluateRiskVerdict)({
             symbol,
             action: signal.action,
@@ -131,6 +142,8 @@ async function evaluateCandidate(candidate, cycleNumber) {
             stopLossPrice: signal.stopLossPrice,
             takeProfitPrice: signal.takeProfitPrice,
             fundingRate: candidate.fundingRate,
+            candles1h: c1h,
+            candles30m: c30m,
             candles15m: c15m,
             candles5m: c5m,
             walletBalance: 10.00,

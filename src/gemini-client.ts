@@ -107,7 +107,7 @@ function parseJsonClean(raw: string): any {
 
 /** Call Gemini 3.6 Flash generateContent with automatic key rotation */
 async function callGeminiWithRotation(system: string, userPrompt: string, timeoutMs = 12000): Promise<any> {
-  const maxAttempts = Math.min(CONFIG.GEMINI_KEYS.length, 3);
+  const maxAttempts = Math.min(CONFIG.GEMINI_KEYS.length, 6);
   let lastError: any = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -193,17 +193,18 @@ export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise
     '2. ADVISORY SIGNALS (SECONDARY HEURISTICS):\n' +
     '   Any indicator figures (RSI, VWAP, ADX, regime) provided in the prompt were computed by a simplistic local bot. THEY CAN BE WRONG, LAGGING, OR MISLEADING. Treat them strictly as advisory recommendations. NEVER trust them blindly over what the raw price action shows.\n\n' +
     'YOUR AUTONOMOUS DECISION PROCESS:\n' +
-    '1. 15m Structure: Identify higher highs/lows vs lower highs/lows, macro trend, and key inflection levels.\n' +
-    '2. 5m Trigger: Inspect the last 3-5 candles. Look for rejection wicks, absorption, or clean pullbacks to support/VWAP. Avoid entering if price is exhausted or chasing far from value.\n' +
-    '3. Win Probability (0-100%): Honestly judge if this trade will actually be profitable before invalidation. If < 60%, STAND ASIDE.\n' +
-    '4. Structural Geometry: If executing, determine the exact structural invalidation level (stopLossPrice) just beyond the key swing/wick, and your realistic target (takeProfitPrice) at the next liquidity pool. Ensure Planned R:R >= 1.5:1.\n' +
-    '5. Final Decision: Output EXECUTE_LONG, EXECUTE_SHORT, or STAND_ASIDE.\n\n' +
+    '1. 1-Hour & 30-Minute Macro Bias: Identify overarching intraday trend, major daily/intraday support & resistance, and institutional bias.\n' +
+    '2. 15-Minute Structure: Identify higher highs/lows vs lower highs/lows, trend continuity, and key pullback inflection zones.\n' +
+    '3. 5-Minute Trigger: Inspect the last 3-5 candles for rejection wicks, absorption, or clean retests of VWAP/support. Avoid chasing extended impulse tops/bottoms.\n' +
+    '4. Win Probability (0-100%): Honestly judge if this trade will actually be profitable before hitting invalidation. If < 60%, STAND ASIDE.\n' +
+    '5. Structural Geometry: If executing, determine the exact structural invalidation level (stopLossPrice) just beyond the key swing/wick, and your realistic target (takeProfitPrice) at the next liquidity pool. Ensure Planned R:R >= 1.5:1.\n' +
+    '6. Final Decision: Output EXECUTE_LONG, EXECUTE_SHORT, or STAND_ASIDE.\n\n' +
     'Return ONLY valid JSON matching this schema:\n' +
     '{\n' +
     '  "decision": "EXECUTE_LONG" | "EXECUTE_SHORT" | "STAND_ASIDE",\n' +
     '  "confidence": number (0-100),\n' +
     '  "winProbability": number (0-100),\n' +
-    '  "marketStructureAnalysis": "Concise 1-2 sentence breakdown of raw 15m & 5m price action",\n' +
+    '  "marketStructureAnalysis": "Concise 1-2 sentence breakdown of 1h/30m/15m/5m price action",\n' +
     '  "reasoning": "Why this trade will be profitable or why standing aside protects your capital",\n' +
     '  "stopLossPrice": number,\n' +
     '  "takeProfitPrice": number,\n' +
@@ -222,15 +223,21 @@ export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise
     `Current Price: $${fmtPrice(currentPrice)}\n` +
     `8h Funding Rate: ${fundingStr}\n\n` +
     `=== RAW MARKET DATA (PRIMARY SOURCE OF TRUTH) ===\n` +
-    `${formatCandleSequence(params.candles15m || [], '15-Minute Macro Structure', 16)}\n\n` +
-    `${formatCandleSequence(params.candles5m || [], '5-Minute Trigger & Execution', 12)}\n\n` +
+    (params.candles1h && params.candles1h.length > 0
+      ? `${formatCandleSequence(params.candles1h, '1-Hour Macro Trend & Regime', 8)}\n\n`
+      : '') +
+    (params.candles30m && params.candles30m.length > 0
+      ? `${formatCandleSequence(params.candles30m, '30-Minute Intermediate Structure', 8)}\n\n`
+      : '') +
+    `${formatCandleSequence(params.candles15m || [], '15-Minute Market Structure', 12)}\n\n` +
+    `${formatCandleSequence(params.candles5m || [], '5-Minute Trigger & Execution', 10)}\n\n` +
     `=== ADVISORY RECOMMENDATIONS (LOCAL HEURISTICS - DO NOT TRUST BLINDLY) ===\n` +
     `- Local Bot Suggested Direction: ${params.action}\n` +
     `- Local Planned Stop Loss: $${fmtPrice(params.stopLossPrice)} | Take Profit: $${fmtPrice(params.takeProfitPrice)}\n` +
     `- Local Planned R:R: ${params.plannedRR.toFixed(2)}:1\n` +
     `- Local Advisory Indicators: 15m Regime: ${params.technicalBlock.regime15m} | ADX: ${params.technicalBlock.adx15m.toFixed(1)} | CHOP: ${params.technicalBlock.chop15m.toFixed(1)} | 5m RSI: ${params.technicalBlock.rsi5m.toFixed(1)} | VWAP: $${fmtPrice(params.technicalBlock.vwap5m)} | Vol Z-Score: ${params.technicalBlock.volumeZ5m.toFixed(2)} | ATR: $${fmtPrice(params.technicalBlock.atr5m)}\n\n` +
     `=== YOUR TRADING DECISION ===\n` +
-    `Analyze the raw candles above. Is this trade truly going to be profitable?\n` +
+    `Analyze the multi-timeframe candles above (1H, 30m, 15m, 5m). Is this trade truly going to be profitable?\n` +
     `Are you willing to risk your own capital on it?\n` +
     `Define your decision, structural stopLossPrice, takeProfitPrice, and estimated winProbability. Return JSON.`;
 

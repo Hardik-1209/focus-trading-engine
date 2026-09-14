@@ -45,4 +45,10 @@ export declare function computeRegime15m(candles15m: Candle[]): {
     chop15m: number;
     vwap15m: number;
 };
+/**
+ * Synthesizes higher timeframe candles (e.g. 30m or 1h) from lower timeframe (e.g. 15m) candles.
+ * 30m = 2 x 15m candles
+ * 60m (1h) = 4 x 15m candles
+ */
+export declare function aggregateCandles(candles: Candle[], targetMinutes: 30 | 60): Candle[];
 //# sourceMappingURL=indicators.d.ts.map

@@ -20,6 +20,7 @@ exports.calculateVWAP = calculateVWAP;
 exports.findSwingLow = findSwingLow;
 exports.findSwingHigh = findSwingHigh;
 exports.computeRegime15m = computeRegime15m;
+exports.aggregateCandles = aggregateCandles;
 function calculateEMA(prices, period) {
     const ema = new Array(prices.length).fill(NaN);
     if (prices.length < period || period <= 0)
@@ -284,5 +285,42 @@ function computeRegime15m(candles15m) {
         return { regime: 'TRENDING_BEAR', ema21, ema50, adx15m, chop15m, vwap15m };
     }
     return { regime: 'RANGING', ema21, ema50, adx15m, chop15m, vwap15m };
+}
+/**
+ * Synthesizes higher timeframe candles (e.g. 30m or 1h) from lower timeframe (e.g. 15m) candles.
+ * 30m = 2 x 15m candles
+ * 60m (1h) = 4 x 15m candles
+ */
+function aggregateCandles(candles, targetMinutes) {
+    const countPerBar = targetMinutes === 30 ? 2 : 4;
+    if (!candles || candles.length < countPerBar)
+        return [];
+    const aggregated = [];
+    const remainder = candles.length % countPerBar;
+    const aligned = remainder === 0 ? candles : candles.slice(remainder);
+    for (let i = 0; i < aligned.length; i += countPerBar) {
+        const group = aligned.slice(i, i + countPerBar);
+        const open = group[0].open;
+        const close = group[group.length - 1].close;
+        let high = -Infinity;
+        let low = Infinity;
+        let volume = 0;
+        for (const c of group) {
+            if (c.high > high)
+                high = c.high;
+            if (c.low < low)
+                low = c.low;
+            volume += c.volume;
+        }
+        aggregated.push({
+            timestamp: group[0].timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume: parseFloat(volume.toFixed(2)),
+        });
+    }
+    return aggregated;
 }
 //# sourceMappingURL=indicators.js.map

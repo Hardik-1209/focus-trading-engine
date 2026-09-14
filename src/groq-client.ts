@@ -34,6 +34,8 @@ export interface RiskParams {
   stopLossPrice: number;
   takeProfitPrice: number;
   fundingRate?: number;
+  candles1h?: Candle[];
+  candles30m?: Candle[];
   candles15m?: Candle[];
   candles5m?: Candle[];
   walletBalance?: number;

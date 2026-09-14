@@ -132,7 +132,7 @@ export async function fetchCurrentPrice(symbol: string): Promise<number> {
 export async function fetchBootstrapCandles(
   symbol: string,
   limit = 60,
-  granularity: '1m' | '5m' | '15m' = '5m'
+  granularity: '1m' | '5m' | '15m' | '30m' | '1H' = '5m'
 ): Promise<any[]> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
