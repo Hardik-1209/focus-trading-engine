@@ -19,11 +19,9 @@ function detectSignal(candles5m, currentPrice, candles15m = []) {
     }
     // 1. 15-Minute Regime Classification
     const { regime, adx15m, chop15m } = (0, indicators_1.computeRegime15m)(candles15m);
-    if (regime === 'VOLATILE_CHOP') {
-        return mkWait(`Market in volatile chop on 15m (CHOP=${chop15m.toFixed(1)}>58, ADX=${adx15m.toFixed(1)}). Capital protected.`, currentPrice, regime);
-    }
-    if (regime === 'RANGING') {
-        return mkWait(`Market in horizontal ranging state on 15m. Awaiting directional breakout.`, currentPrice, regime);
+    // Only veto if in extreme chaotic chop with zero direction
+    if (chop15m > config_1.SIGNAL.CHOP_MAX && adx15m < 14) {
+        return mkWait(`Extreme chaotic chop on 15m (CHOP=${chop15m.toFixed(1)}>${config_1.SIGNAL.CHOP_MAX}, ADX=${adx15m.toFixed(1)}<14). Capital protected.`, currentPrice, regime);
     }
     // 2. 5-Minute Technical Indicators
     const closes5m = candles5m.map(c => c.close);
@@ -60,54 +58,146 @@ function detectSignal(candles5m, currentPrice, candles15m = []) {
         swingHigh,
         currentPrice,
     };
-    // ─── HIGH CONVICTION PULLBACK: LONG ──────────────────────────────────────────
-    // 15m is TRENDING_BULL, 5m price pulled back into EMA21/VWAP (RSI 38-50), volume expands
-    if (regime === 'TRENDING_BULL' &&
+    // ─── SETUP 1: 15M/5M TREND PULLBACK CONTINUATION ────────────────────────────
+    // Bullish trend: 15m BULL or 5m EMA9 > EMA21, price pulled into EMA21/VWAP (RSI 36-54)
+    if ((regime === 'TRENDING_BULL' || (ema9 >= ema21 && currentPrice >= (vwap5m - atr5m * 0.4))) &&
         rsi5m <= config_1.SIGNAL.RSI_PULLBACK_LONG &&
         rsi5m >= 34 &&
-        currentPrice >= (ema21 - atr5m * 0.5) &&
-        macdHist > prevHist &&
-        volumeZ5m >= 0.8) {
-        // Dynamic Triple Barrier Geometry
+        currentPrice >= (ema21 - atr5m * 0.8) &&
+        (macdHist >= prevHist || macdHist > 0)) {
         const rawStopDist = Math.max(currentPrice - swingLow, atr5m * config_1.RISK.STOP_LOSS_ATR_MULT);
         const stopLossPrice = currentPrice - rawStopDist;
         const takeProfitPrice = currentPrice + (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
-        const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / (currentPrice - stopLossPrice)).toFixed(2));
-        return {
-            action: 'LONG',
-            regime,
-            stopLossPrice,
-            takeProfitPrice,
-            plannedRR,
-            atr: atr5m,
-            indicators: ind,
-            reason: `15M_BULL_PULLBACK: 15m=BULL, 5m RSI=${rsi5m.toFixed(1)} pulled into EMA21/VWAP, planned RR=${plannedRR}:1`,
-        };
+        const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
+        if (plannedRR >= 1.4) {
+            return {
+                action: 'LONG',
+                regime,
+                stopLossPrice,
+                takeProfitPrice,
+                plannedRR,
+                atr: atr5m,
+                indicators: ind,
+                reason: `TREND_PULLBACK_LONG: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)} pulled to EMA21/VWAP, planned RR=${plannedRR}:1`,
+            };
+        }
     }
-    // ─── HIGH CONVICTION PULLBACK: SHORT ─────────────────────────────────────────
-    // 15m is TRENDING_BEAR, 5m price rallied into EMA21/VWAP (RSI 50-62), volume expands
-    if (regime === 'TRENDING_BEAR' &&
+    // Bearish trend: 15m BEAR or 5m EMA9 < EMA21, price rallied into EMA21/VWAP (RSI 46-64)
+    if ((regime === 'TRENDING_BEAR' || (ema9 <= ema21 && currentPrice <= (vwap5m + atr5m * 0.4))) &&
         rsi5m >= config_1.SIGNAL.RSI_PULLBACK_SHORT &&
         rsi5m <= 66 &&
-        currentPrice <= (ema21 + atr5m * 0.5) &&
-        macdHist < prevHist &&
-        volumeZ5m >= 0.8) {
+        currentPrice <= (ema21 + atr5m * 0.8) &&
+        (macdHist <= prevHist || macdHist < 0)) {
         const rawStopDist = Math.max(swingHigh - currentPrice, atr5m * config_1.RISK.STOP_LOSS_ATR_MULT);
         const stopLossPrice = currentPrice + rawStopDist;
         const takeProfitPrice = currentPrice - (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
-        const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / (stopLossPrice - currentPrice)).toFixed(2));
-        return {
-            action: 'SHORT',
-            regime,
-            stopLossPrice,
-            takeProfitPrice,
-            plannedRR,
-            atr: atr5m,
-            indicators: ind,
-            reason: `15M_BEAR_PULLBACK: 15m=BEAR, 5m RSI=${rsi5m.toFixed(1)} rallied into EMA21/VWAP, planned RR=${plannedRR}:1`,
-        };
+        const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
+        if (plannedRR >= 1.4) {
+            return {
+                action: 'SHORT',
+                regime,
+                stopLossPrice,
+                takeProfitPrice,
+                plannedRR,
+                atr: atr5m,
+                indicators: ind,
+                reason: `TREND_PULLBACK_SHORT: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)} rallied to EMA21/VWAP, planned RR=${plannedRR}:1`,
+            };
+        }
     }
-    return mkWait(`5m bar waiting for pullback. 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)}, VolZ=${volumeZ5m.toFixed(2)}, ADX=${adx15m.toFixed(1)}`, currentPrice, regime, ind);
+    // ─── SETUP 2: RANGE-BOUND MEAN REVERSION (When 15m is RANGING) ──────────────
+    if (regime === 'RANGING' || chop15m >= 50) {
+        // Range Support Buy: Price near swingLow, RSI oversold <= 38, momentum bottoming
+        if (rsi5m <= config_1.SIGNAL.RSI_RANGE_BUY &&
+            currentPrice <= (ema21 - atr5m * 0.3) &&
+            macdHist > prevHist) {
+            const stopLossPrice = Math.min(swingLow - (atr5m * 0.4), currentPrice - (atr5m * config_1.RISK.STOP_LOSS_ATR_MULT));
+            const takeProfitPrice = currentPrice + (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
+            const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
+            if (plannedRR >= 1.4) {
+                return {
+                    action: 'LONG',
+                    regime,
+                    stopLossPrice,
+                    takeProfitPrice,
+                    plannedRR,
+                    atr: atr5m,
+                    indicators: ind,
+                    reason: `RANGE_SUPPORT_LONG: Range mean-reversion, RSI=${rsi5m.toFixed(1)} at support, planned RR=${plannedRR}:1`,
+                };
+            }
+        }
+        // Range Resistance Short: Price near swingHigh, RSI overbought >= 62, momentum topping
+        if (rsi5m >= config_1.SIGNAL.RSI_RANGE_SELL &&
+            currentPrice >= (ema21 + atr5m * 0.3) &&
+            macdHist < prevHist) {
+            const stopLossPrice = Math.max(swingHigh + (atr5m * 0.4), currentPrice + (atr5m * config_1.RISK.STOP_LOSS_ATR_MULT));
+            const takeProfitPrice = currentPrice - (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
+            const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
+            if (plannedRR >= 1.4) {
+                return {
+                    action: 'SHORT',
+                    regime,
+                    stopLossPrice,
+                    takeProfitPrice,
+                    plannedRR,
+                    atr: atr5m,
+                    indicators: ind,
+                    reason: `RANGE_RESISTANCE_SHORT: Range mean-reversion, RSI=${rsi5m.toFixed(1)} at resistance, planned RR=${plannedRR}:1`,
+                };
+            }
+        }
+    }
+    // ─── SETUP 3: 5M MICROSTRUCTURE MOMENTUM EXPANSION ─────────────────────────
+    // Bullish expansion: EMA9 > EMA21, price above VWAP, RSI 48-68, MACD positive expansion
+    if (ema9 > ema21 &&
+        currentPrice > vwap5m &&
+        rsi5m >= 48 &&
+        rsi5m <= config_1.SIGNAL.RSI_OVERBOUGHT &&
+        macdHist > 0 &&
+        macdHist >= prevHist &&
+        volumeZ5m >= config_1.SIGNAL.VOLUME_ZSCORE_MIN) {
+        const stopLossPrice = currentPrice - (atr5m * config_1.RISK.STOP_LOSS_ATR_MULT);
+        const takeProfitPrice = currentPrice + (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
+        const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
+        if (plannedRR >= 1.4) {
+            return {
+                action: 'LONG',
+                regime,
+                stopLossPrice,
+                takeProfitPrice,
+                plannedRR,
+                atr: atr5m,
+                indicators: ind,
+                reason: `MOMENTUM_BREAKOUT_LONG: 5m EMA9>21 + VWAP reclaim + VolZ=${volumeZ5m.toFixed(2)}, planned RR=${plannedRR}:1`,
+            };
+        }
+    }
+    // Bearish expansion: EMA9 < EMA21, price below VWAP, RSI 32-52, MACD negative expansion
+    if (ema9 < ema21 &&
+        currentPrice < vwap5m &&
+        rsi5m <= 52 &&
+        rsi5m >= config_1.SIGNAL.RSI_OVERSOLD &&
+        macdHist < 0 &&
+        macdHist <= prevHist &&
+        volumeZ5m >= config_1.SIGNAL.VOLUME_ZSCORE_MIN) {
+        const stopLossPrice = currentPrice + (atr5m * config_1.RISK.STOP_LOSS_ATR_MULT);
+        const takeProfitPrice = currentPrice - (atr5m * config_1.RISK.TAKE_PROFIT_ATR_MULT);
+        const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
+        if (plannedRR >= 1.4) {
+            return {
+                action: 'SHORT',
+                regime,
+                stopLossPrice,
+                takeProfitPrice,
+                plannedRR,
+                atr: atr5m,
+                indicators: ind,
+                reason: `MOMENTUM_BREAKOUT_SHORT: 5m EMA9<21 + VWAP rejection + VolZ=${volumeZ5m.toFixed(2)}, planned RR=${plannedRR}:1`,
+            };
+        }
+    }
+    return mkWait(`Awaiting setup trigger: 15m=${regime}, 5m RSI=${rsi5m.toFixed(1)}, VolZ=${volumeZ5m.toFixed(2)}, ADX=${adx15m.toFixed(1)}`, currentPrice, regime, ind);
 }
 function mkWait(reason, currentPrice, regime, ind) {
     return {

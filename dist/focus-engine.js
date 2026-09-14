@@ -2,12 +2,19 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runFocusEngine = runFocusEngine;
 /**
- * focus-engine.ts (v3.0)
- * Quantitative 15m/5m Multi-Timeframe Focus Orchestrator with Adversarial Groq Risk Auditor,
- * Risk Governor Circuit Breakers, and Dynamic Triple Barrier Geometry.
+ * focus-engine.ts (v3.2)
+ * High-Cadence Concurrent Basket Quantitative Engine
+ *
+ * Architecture:
+ * 1. Evaluates Top 15 liquid Bitget futures pairs in parallel every 20s.
+ * 2. Tri-Setup Quantitative Scanner:
+ *    - 15m/5m Trend Continuation Pullbacks
+ *    - 15m Range-Bound Mean Reversions
+ *    - 5m Microstructure Momentum Breakouts
+ * 3. AI CRO Auditor: Google Gemini 3.6 Flash (6-Key rotation array, 90 req/min).
+ * 4. Multi-Position Guardian: Up to 4 concurrent positions with flat $1.00 margin (3x leverage).
  */
 const coin_selector_1 = require("./coin-selector");
-const bitget_ws_1 = require("./bitget-ws");
 const signal_detector_1 = require("./signal-detector");
 const llm_router_1 = require("./llm-router");
 const risk_governor_1 = require("./risk-governor");
@@ -18,195 +25,38 @@ const config_1 = require("./config");
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const lastSignalTime = new Map();
 let analysisInProgress = false;
-/** Watch a single coin on 15m/5m candles until trade closes, timeout, or chop exit */
-async function watchCoin(symbol, cycleNumber, fundingRate) {
-    console.log(`\n${'═'.repeat(65)}`);
-    console.log(`👁  FOCUS v3.0: ${symbol} | Max watch: ${config_1.CONFIG.WATCH_DURATION_MS / 60000} min (Cycle #${cycleNumber})`);
-    console.log(`${'═'.repeat(65)}\n`);
-    (0, server_1.setServerFocusedCoin)(symbol, cycleNumber);
-    (0, supabase_logger_1.updateEngineStatus)({
-        focused_symbol: symbol,
-        cycle_count: cycleNumber,
-        active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
-        is_running: true,
-    }).catch(() => { });
-    // 1. Bootstrap 5m & 15m historical candles
-    let bootstrapCandles5m = [];
-    let bootstrapCandles15m = [];
-    try {
-        const [c5m, c15m] = await Promise.all([
-            (0, coin_selector_1.fetchBootstrapCandles)(symbol, 60, '5m'),
-            (0, coin_selector_1.fetchBootstrapCandles)(symbol, 40, '15m'),
-        ]);
-        bootstrapCandles5m = c5m;
-        bootstrapCandles15m = c15m;
-        console.log(`[Engine v3.0] Bootstrapped ${bootstrapCandles5m.length} x 5m and ${bootstrapCandles15m.length} x 15m candles`);
+const candleCache = new Map();
+async function getCandlesWithCache(symbol) {
+    const cached = candleCache.get(symbol);
+    if (cached && (Date.now() - cached.timestamp < 25000)) {
+        return { c5m: cached.candles5m, c15m: cached.candles15m };
     }
-    catch (err) {
-        console.warn(`[Engine] Bootstrap warning: ${err.message}. Initializing empty buffers.`);
-    }
-    // 2. Connect WebSocket
-    const ws = new bitget_ws_1.BitgetWS(symbol);
-    ws.seedCandles(bootstrapCandles5m, '5m');
-    ws.seedCandles(bootstrapCandles15m, '15m');
-    (0, supabase_logger_1.updateEngineStatus)({
-        focused_symbol: symbol,
-        cycle_count: cycleNumber,
-        active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
-        live_indicators: {
-            price: bootstrapCandles5m[bootstrapCandles5m.length - 1]?.close || 0,
-            timestamp: new Date().toISOString(),
-        },
-    }).catch(() => { });
-    let tradeOpened = false;
-    let lastLoggedBar = 0;
-    let stagnantCandlesCount = 0;
-    // 3. Candle 5m close event — run quantitative 15m/5m signal detection
-    ws.on('candle5m', async (latestCandle, allCandles5m, allCandles15m) => {
-        if (analysisInProgress)
-            return;
-        if (tradeOpened && !(0, position_guardian_1.hasOpenPosition)(symbol))
-            return;
-        if ((0, position_guardian_1.hasOpenPosition)(symbol))
-            return;
-        // Check Risk Governor circuit breaker
-        const govCheck = risk_governor_1.riskGovernor.canTradeSymbol(symbol);
-        if (!govCheck.allowed) {
-            console.warn(`[Engine v3.0] Symbol ${symbol} blocked by Risk Governor: ${govCheck.reason}`);
-            return;
-        }
-        // Cooldown check
-        const lastSig = lastSignalTime.get(symbol) || 0;
-        if (Date.now() - lastSig < config_1.SIGNAL.SIGNAL_COOLDOWN_MS)
-            return;
-        // Run multi-timeframe signal detection
-        const signal = (0, signal_detector_1.detectSignal)(allCandles5m, latestCandle.close, allCandles15m);
-        // Broadcast live telemetry
-        (0, supabase_logger_1.updateEngineStatus)({
-            focused_symbol: symbol,
-            cycle_count: cycleNumber,
-            active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
-            live_indicators: {
-                price: latestCandle.close,
-                rsi: signal.indicators.rsi5m,
-                adx: signal.indicators.adx15m,
-                chop: signal.indicators.chop15m,
-                vwap: signal.indicators.vwap5m,
-                regime: signal.indicators.regime15m,
-                atr: signal.indicators.atr5m,
-                volZ: signal.indicators.volumeZ5m,
-                timestamp: new Date().toISOString(),
-            },
-        }).catch(() => { });
-        if (signal.action === 'WAIT') {
-            if (signal.regime === 'VOLATILE_CHOP' || signal.regime === 'RANGING') {
-                stagnantCandlesCount++;
-            }
-            else {
-                stagnantCandlesCount = 0;
-            }
-            if (latestCandle.timestamp !== lastLoggedBar) {
-                console.log(`[Engine v3.0] ⏳ ${signal.reason}`);
-                lastLoggedBar = latestCandle.timestamp;
-                await (0, supabase_logger_1.logFocusEvent)({
-                    event_type: 'SYSTEM_PING',
-                    symbol,
-                    action: 'WAIT',
-                    indicators: signal.indicators,
-                    message: signal.reason,
-                });
-            }
-            return;
-        }
-        console.log(`\n[Engine v3.0] 🔔 Setup detected! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1`);
-        console.log(`[Engine v3.0] ${signal.reason}`);
-        lastSignalTime.set(symbol, Date.now());
-        analysisInProgress = true;
-        try {
-            // 4. Adversarial Chief Risk Officer (CRO) Audit via Groq
-            console.log(`[Engine v3.0] 🛡️ Routing setup to Adversarial Groq CRO for 5-point disqualification audit...`);
-            const verdict = await (0, llm_router_1.evaluateRiskVerdict)({
-                symbol,
-                action: signal.action,
-                plannedRR: signal.plannedRR,
-                stopLossPrice: signal.stopLossPrice,
-                takeProfitPrice: signal.takeProfitPrice,
-                fundingRate,
-                technicalBlock: {
-                    rsi5m: signal.indicators.rsi5m,
-                    atr5m: signal.indicators.atr5m,
-                    volumeZ5m: signal.indicators.volumeZ5m,
-                    vwap5m: signal.indicators.vwap5m,
-                    regime15m: signal.indicators.regime15m,
-                    adx15m: signal.indicators.adx15m,
-                    chop15m: signal.indicators.chop15m,
-                    currentPrice: latestCandle.close,
-                },
-            });
-            const approved = verdict.verdict === 'APPROVE';
-            const llmReasoning = `[${verdict.llmSource}] ${verdict.reasoning}`;
-            // Audit signal to database
-            await (0, supabase_logger_1.logMarketSignal)({
-                symbol,
-                action: signal.action,
-                tier: 2,
-                approved,
-                llm_source: verdict.llmSource,
-                confidence: verdict.confidence,
-                indicators: signal.indicators,
-                reason: `${signal.reason} | CRO Verdict: ${verdict.verdict} (${verdict.reasoning})`,
-            });
-            if (approved) {
-                console.log(`[Engine v3.0] 🎯 CRO AUDIT PASSED: Executing ${signal.action} trade!`);
-                await executeTrade(symbol, signal.action, latestCandle.close, signal.stopLossPrice, signal.takeProfitPrice, signal.atr, signal.plannedRR, verdict.llmSource, llmReasoning, signal.indicators);
-                tradeOpened = true;
-            }
-            else {
-                console.log(`[Engine v3.0] ❌ Trade VETOED by CRO (${verdict.reasoning}). Capital protected.`);
-            }
-        }
-        catch (err) {
-            console.error(`[Engine v3.0] Analysis error: ${err.message}`);
-        }
-        finally {
-            analysisInProgress = false;
-        }
+    const [c5m, c15m] = await Promise.all([
+        (0, coin_selector_1.fetchBootstrapCandles)(symbol, 60, '5m'),
+        (0, coin_selector_1.fetchBootstrapCandles)(symbol, 40, '15m'),
+    ]);
+    candleCache.set(symbol, {
+        timestamp: Date.now(),
+        candles5m: c5m,
+        candles15m: c15m,
     });
-    ws.connect();
-    // 5. Watch loop
-    const watchUntil = Date.now() + config_1.CONFIG.WATCH_DURATION_MS;
-    const minWatchUntil = Date.now() + 180000; // Allow at least 3 minutes
-    while (Date.now() < watchUntil) {
-        if (tradeOpened && !(0, position_guardian_1.hasOpenPosition)(symbol)) {
-            console.log(`[Engine v3.0] 🏁 Trade for ${symbol} completed. Rotating to next volatile coin...`);
-            ws.disconnect();
-            return 'trade_closed';
-        }
-        // Early exit if 3 consecutive 5m candles in chop
-        if (!tradeOpened && Date.now() > minWatchUntil && stagnantCandlesCount >= 3) {
-            console.log(`[Engine v3.0] ⚡ Early rotation triggered for ${symbol}: 3 consecutive choppy candles. Rotating...`);
-            ws.disconnect();
-            return 'stagnant_rotated';
-        }
-        await sleep(1000);
-    }
-    ws.disconnect();
-    return tradeOpened ? 'no_trade' : 'timeout';
+    return { c5m, c15m };
 }
+/** Execute trade in database, register in Position Guardian, and log */
 async function executeTrade(symbol, side, entryPrice, stopLossPrice, takeProfitPrice, atr, plannedRR, llmSource, aiReasoning, indicatorsAtEntry = {}) {
     if (await (0, supabase_logger_1.checkRecentTrade)(symbol)) {
-        console.warn(`[Engine v3.0] Idempotency guard: trade for ${symbol} placed recently. Skipping.`);
+        console.warn(`[Engine v3.2] Idempotency guard: trade for ${symbol} placed recently. Skipping.`);
         return;
     }
     const wallet = await (0, supabase_logger_1.fetchWalletBalance)();
     const margin = config_1.RISK.MARGIN_PER_TRADE; // Flat $1.00 margin per trade
     const posSize = margin * config_1.RISK.LEVERAGE; // $3.00 notional at 3x leverage
     const amount = posSize / entryPrice;
-    console.log(`\n💰 [Engine v3.0] OPENING ${side} on ${symbol}`);
+    console.log(`\n💰 [Engine v3.2] OPENING ${side} on ${symbol}`);
     console.log(`   Wallet: $${wallet.toFixed(2)} | Margin: $${margin.toFixed(2)} | Notional: $${posSize.toFixed(2)} (${config_1.RISK.LEVERAGE}x)`);
     console.log(`   Entry: $${entryPrice} | SL: $${stopLossPrice.toFixed(4)} | TP: $${takeProfitPrice.toFixed(4)} | Planned R:R: ${plannedRR}:1`);
     if (config_1.CONFIG.DRY_RUN) {
-        console.log(`[Engine v3.0] [DRY RUN] Simulating ${side} trade for ${symbol}`);
+        console.log(`[Engine v3.2] [DRY RUN] Simulating ${side} trade for ${symbol}`);
         const tradeId = await (0, supabase_logger_1.insertFuturesTrade)({
             symbol,
             position_side: side,
@@ -241,58 +91,237 @@ async function executeTrade(symbol, side, entryPrice, stopLossPrice, takeProfitP
             llm_source: llmSource,
             action: side,
             indicators: { atr, entry: entryPrice, plannedRR },
-            message: `[DRY RUN v3.0] ${side} @ $${entryPrice} | TP: $${takeProfitPrice.toFixed(4)} | SL: $${stopLossPrice.toFixed(4)} (RR: ${plannedRR}:1)`,
+            message: `[DRY RUN v3.2] ${side} @ $${entryPrice} | TP: $${takeProfitPrice.toFixed(4)} | SL: $${stopLossPrice.toFixed(4)} (RR: ${plannedRR}:1)`,
         });
     }
 }
-/** Main infinite trading loop */
+/** Evaluate a single candidate asset for trade entry */
+async function evaluateCandidate(candidate, cycleNumber) {
+    const symbol = candidate.symbol;
+    // 1. Guard checks
+    if ((0, position_guardian_1.hasOpenPosition)(symbol))
+        return false;
+    const govCheck = risk_governor_1.riskGovernor.canTradeSymbol(symbol);
+    if (!govCheck.allowed)
+        return false;
+    const lastSig = lastSignalTime.get(symbol) || 0;
+    if (Date.now() - lastSig < config_1.SIGNAL.SIGNAL_COOLDOWN_MS)
+        return false;
+    try {
+        // 2. Fetch candles
+        const { c5m, c15m } = await getCandlesWithCache(symbol);
+        if (c5m.length < 20 || c15m.length < 20)
+            return false;
+        const latestCandle = c5m[c5m.length - 1];
+        const currentPrice = latestCandle.close;
+        // 3. Quantitative Tri-Setup Signal Detection
+        const signal = (0, signal_detector_1.detectSignal)(c5m, currentPrice, c15m);
+        if (signal.action === 'WAIT') {
+            return false;
+        }
+        console.log(`\n[Engine v3.2] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1`);
+        console.log(`[Engine v3.2] Setup: ${signal.reason}`);
+        lastSignalTime.set(symbol, Date.now());
+        // 4. Autonomous Senior Quant Trader Evaluation via Google Gemini 3.6 Flash
+        console.log(`[Engine v3.3] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader...`);
+        const verdict = await (0, llm_router_1.evaluateRiskVerdict)({
+            symbol,
+            action: signal.action,
+            plannedRR: signal.plannedRR,
+            stopLossPrice: signal.stopLossPrice,
+            takeProfitPrice: signal.takeProfitPrice,
+            fundingRate: candidate.fundingRate,
+            candles15m: c15m,
+            candles5m: c5m,
+            walletBalance: 10.00,
+            technicalBlock: {
+                rsi5m: signal.indicators.rsi5m,
+                atr5m: signal.indicators.atr5m,
+                volumeZ5m: signal.indicators.volumeZ5m,
+                vwap5m: signal.indicators.vwap5m,
+                regime15m: signal.indicators.regime15m,
+                adx15m: signal.indicators.adx15m,
+                chop15m: signal.indicators.chop15m,
+                currentPrice,
+                swingLow: signal.indicators.swingLow,
+                swingHigh: signal.indicators.swingHigh,
+            },
+        });
+        const approved = verdict.verdict === 'APPROVE';
+        const llmReasoning = `[${verdict.llmSource}] ${verdict.reasoning}`;
+        // Audit signal to database
+        await (0, supabase_logger_1.logMarketSignal)({
+            symbol,
+            action: signal.action,
+            tier: 2,
+            approved,
+            llm_source: verdict.llmSource,
+            confidence: verdict.confidence,
+            indicators: signal.indicators,
+            reason: `${signal.reason} | Trader Decision: ${verdict.decision} (WinProb: ${verdict.winProbability}%) | Analysis: ${verdict.marketStructureAnalysis || ''} | Reason: ${verdict.reasoning}`,
+        });
+        if (approved) {
+            let finalAction = signal.action;
+            if (verdict.decision === 'EXECUTE_LONG')
+                finalAction = 'LONG';
+            if (verdict.decision === 'EXECUTE_SHORT')
+                finalAction = 'SHORT';
+            let finalStopLoss = signal.stopLossPrice;
+            let finalTakeProfit = signal.takeProfitPrice;
+            // Sanity check structural SL from LLM:
+            if (verdict.suggestedStopLoss && verdict.suggestedStopLoss > 0) {
+                if (finalAction === 'LONG') {
+                    const slDistPct = (currentPrice - verdict.suggestedStopLoss) / currentPrice;
+                    if (slDistPct >= 0.005 && slDistPct <= 0.045) {
+                        finalStopLoss = verdict.suggestedStopLoss;
+                        console.log(`[Engine v3.3] 🎯 Using Gemini Structural Stop Loss @ $${finalStopLoss.toFixed(4)} (-${(slDistPct * 100).toFixed(2)}%)`);
+                    }
+                }
+                else if (finalAction === 'SHORT') {
+                    const slDistPct = (verdict.suggestedStopLoss - currentPrice) / currentPrice;
+                    if (slDistPct >= 0.005 && slDistPct <= 0.045) {
+                        finalStopLoss = verdict.suggestedStopLoss;
+                        console.log(`[Engine v3.3] 🎯 Using Gemini Structural Stop Loss @ $${finalStopLoss.toFixed(4)} (-${(slDistPct * 100).toFixed(2)}%)`);
+                    }
+                }
+            }
+            if (verdict.suggestedTakeProfit && verdict.suggestedTakeProfit > 0) {
+                if (finalAction === 'LONG' && verdict.suggestedTakeProfit > currentPrice) {
+                    finalTakeProfit = verdict.suggestedTakeProfit;
+                }
+                else if (finalAction === 'SHORT' && verdict.suggestedTakeProfit < currentPrice) {
+                    finalTakeProfit = verdict.suggestedTakeProfit;
+                }
+            }
+            const riskDist = Math.abs(currentPrice - finalStopLoss);
+            const rewardDist = Math.abs(finalTakeProfit - currentPrice);
+            const finalRR = riskDist > 0 ? parseFloat((rewardDist / riskDist).toFixed(2)) : signal.plannedRR;
+            console.log(`[Engine v3.3] 🎯 TRADE APPROVED BY QUANT TRADER (${verdict.decision} | WinProb: ${verdict.winProbability}% | Conf: ${verdict.confidence}/100): Executing ${finalAction} on ${symbol}!`);
+            await executeTrade(symbol, finalAction, currentPrice, finalStopLoss, finalTakeProfit, signal.atr, finalRR, verdict.llmSource, llmReasoning, signal.indicators);
+            return true;
+        }
+        else {
+            console.log(`[Engine v3.3] 🛡️ Trader stood aside on ${symbol} (Decision: ${verdict.decision}, WinProb: ${verdict.winProbability}%). Capital protected.`);
+            return false;
+        }
+    }
+    catch (err) {
+        console.error(`[Engine v3.2] Evaluation error on ${symbol}: ${err.message}`);
+        return false;
+    }
+}
+/** REST Watchdog for Position Guardian to ensure exit triggers never lag */
+function startPositionGuardianWatchdog() {
+    setInterval(async () => {
+        const activeCount = (0, position_guardian_1.getActivePositionsCount)();
+        if (activeCount === 0)
+            return;
+        try {
+            const basket = await (0, coin_selector_1.getTopCandidateBasket)(30).catch(() => []);
+            const priceMap = new Map();
+            for (const b of basket) {
+                priceMap.set(b.symbol, b.lastPrice);
+            }
+            for (const [sym, _] of lastSignalTime.entries()) {
+                const price = priceMap.get(sym);
+                if (price) {
+                    (0, position_guardian_1.onTick)({
+                        symbol: sym,
+                        lastPrice: price,
+                        bestBid: price,
+                        bestAsk: price,
+                        volume24h: 0,
+                        change24h: 0,
+                        ts: Date.now(),
+                    });
+                }
+            }
+        }
+        catch {
+            // Non-critical background watchdog
+        }
+    }, 5000);
+}
+/** Main High-Cadence Concurrent Trading Loop */
 async function runFocusEngine() {
-    console.log('\n🤖 Focus Trading Engine v3.0 starting...');
+    console.log('\n🤖 Focus Trading Engine v3.3 starting (Autonomous Senior Quant Trader + Raw Candles)...');
     await (0, position_guardian_1.syncOpenPositions)();
-    // Initialize Risk Governor starting balance
+    startPositionGuardianWatchdog();
+    // Initialize Risk Governor starting balance and reset circuit breaker on deployment
     const initialWallet = await (0, supabase_logger_1.fetchWalletBalance)().catch(() => 10.00);
     risk_governor_1.riskGovernor.setStartingBalance(initialWallet);
+    risk_governor_1.riskGovernor.resetDailyCircuitBreaker();
+    let cycleCount = await (0, supabase_logger_1.fetchCurrentEngineCycle)();
     while (true) {
-        const cycleCount = await (0, supabase_logger_1.fetchCurrentEngineCycle)();
-        console.log(`\n[Engine v3.0] ━━━ Cycle #${cycleCount} ━━━`);
+        cycleCount++;
+        console.log(`\n[Engine v3.3] ━━━ Scan Cycle #${cycleCount} ━━━`);
         (0, position_guardian_1.displayActiveTrades)();
+        // 1. Check Daily Drawdown Circuit Breaker
         const govStatus = risk_governor_1.riskGovernor.getStatus();
         if (govStatus.dailyHalted) {
-            console.warn(`[Engine v3.0] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
+            console.warn(`[Engine v3.3] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
             await sleep(60000);
             continue;
         }
         try {
+            const activePositionsCount = (0, position_guardian_1.getActivePositionsCount)();
+            const openSlots = config_1.CONFIG.MAX_CONCURRENT_POSITIONS - activePositionsCount;
+            // 2. Fetch top 15 high-momentum liquid candidates
+            const basket = await (0, coin_selector_1.getTopCandidateBasket)(config_1.CONFIG.MAX_CANDIDATES_POOL);
+            const topSymbol = basket[0]?.symbol || 'SOLUSDT';
+            (0, server_1.setServerFocusedCoin)(topSymbol, cycleCount);
+            // Broadcast scanner state
             await (0, supabase_logger_1.updateEngineStatus)({
-                focused_symbol: 'Scanning market (v3.0)...',
+                focused_symbol: `Scanning ${basket.length} Liquid Assets (${activePositionsCount}/${config_1.CONFIG.MAX_CONCURRENT_POSITIONS} active)`,
                 cycle_count: cycleCount,
-                active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
+                active_trades_count: activePositionsCount,
+                live_indicators: {
+                    price: basket[0]?.lastPrice || 0,
+                    regime: 'ACTIVE_CONCURRENT_SCAN',
+                    timestamp: new Date().toISOString(),
+                },
             }).catch(() => { });
-            const coin = await (0, coin_selector_1.selectHottestCoin)();
-            const result = await watchCoin(coin.symbol, cycleCount, coin.fundingRate);
-            const nextCycle = cycleCount + 1;
-            await (0, supabase_logger_1.updateEngineStatus)({
-                cycle_count: nextCycle,
-                active_trades_count: (0, position_guardian_1.getActivePositionsCount)(),
-            }).catch(() => { });
+            if (openSlots <= 0) {
+                console.log(`[Engine v3.2] 🔒 All ${config_1.CONFIG.MAX_CONCURRENT_POSITIONS} position slots active. Guardian managing dynamic exits...`);
+            }
+            else {
+                console.log(`[Engine v3.2] 🔍 Evaluating ${basket.length} assets concurrently. Slots available: ${openSlots}/${config_1.CONFIG.MAX_CONCURRENT_POSITIONS}`);
+                let filledThisCycle = 0;
+                // Evaluate candidates concurrently in batches of 3
+                for (let i = 0; i < basket.length; i += 3) {
+                    if ((0, position_guardian_1.getActivePositionsCount)() >= config_1.CONFIG.MAX_CONCURRENT_POSITIONS)
+                        break;
+                    const batch = basket.slice(i, i + 3);
+                    const results = await Promise.all(batch.map(c => evaluateCandidate(c, cycleCount)));
+                    for (const opened of results) {
+                        if (opened)
+                            filledThisCycle++;
+                    }
+                    if ((0, position_guardian_1.getActivePositionsCount)() >= config_1.CONFIG.MAX_CONCURRENT_POSITIONS) {
+                        console.log(`[Engine v3.2] 🎯 Max concurrent positions (${config_1.CONFIG.MAX_CONCURRENT_POSITIONS}) reached.`);
+                        break;
+                    }
+                    await sleep(150);
+                }
+            }
             await (0, supabase_logger_1.logHealth)({
-                event_type: 'COIN_ROTATED',
+                event_type: 'CYCLE_COMPLETED',
                 component: 'focus-engine',
                 severity: 'INFO',
-                message: `Cycle #${cycleCount} finished on ${coin.symbol}. Result: ${result}. Rotating.`,
+                message: `Scan Cycle #${cycleCount} completed across ${basket.length} candidates. Active positions: ${(0, position_guardian_1.getActivePositionsCount)()}/${config_1.CONFIG.MAX_CONCURRENT_POSITIONS}.`,
             });
-            console.log(`\n[Engine v3.0] Rotation complete (${result}). Inter-cycle pause...`);
-            await sleep(3000);
+            // Sleep between scanner passes
+            await sleep(config_1.CONFIG.SCANNER_INTERVAL_MS);
         }
         catch (err) {
-            console.error(`[Engine v3.0] Cycle error: ${err.message}`);
+            console.error(`[Engine v3.2] Cycle error: ${err.message}`);
             await (0, supabase_logger_1.logHealth)({
                 event_type: 'CYCLE_ERROR',
                 component: 'focus-engine',
                 severity: 'ERROR',
                 message: err.message,
             });
-            await sleep(15000);
+            await sleep(10000);
         }
     }
 }

@@ -4,7 +4,43 @@
  * 6-Key Round-Robin Rotation Array with 60s Rate-Limit Cooldown & Passive Telemetry.
  */
 import { CONFIG } from './config';
-import type { RiskParams, RiskVerdict, NarrativeScore } from './groq-client';
+import type { Candle } from './indicators';
+import type { RiskParams, RiskVerdict, NarrativeScore, AutonomousDecision } from './groq-client';
+
+function fmtPrice(val: number): string {
+  if (val >= 1000) return val.toFixed(2);
+  if (val >= 1) return val.toFixed(4);
+  if (val >= 0.01) return val.toFixed(6);
+  return val.toFixed(8);
+}
+
+/**
+ * Serializes raw Candle array into a structured tabular representation for LLM analysis.
+ * Chronological order: oldest candle is row 1, newest candle is at bottom marked (CURRENT).
+ */
+export function formatCandleSequence(candles: Candle[] = [], timeframe: string, maxCount = 16): string {
+  if (!candles || candles.length === 0) return `[No ${timeframe} candle data available]`;
+
+  const slice = candles.slice(-maxCount);
+  const rows: string[] = [];
+  rows.push(`Timeframe: ${timeframe} (Last ${slice.length} candles, chronological: oldest -> newest):`);
+  rows.push(`Index | Time (UTC) | Open | High | Low | Close | Volume | Change%`);
+
+  for (let i = 0; i < slice.length; i++) {
+    const c = slice[i];
+    const isLatest = i === slice.length - 1;
+    const date = new Date(c.timestamp);
+    const timeStr = date.toISOString().substring(11, 16);
+    const chgPct = c.open > 0 ? (((c.close - c.open) / c.open) * 100).toFixed(2) : '0.00';
+    const sign = Number(chgPct) >= 0 ? '+' : '';
+    const label = isLatest ? `${i + 1} (CURRENT)` : `${i + 1}`;
+    rows.push(
+      `${label.padEnd(11)} | ${timeStr} | ${fmtPrice(c.open)} | ${fmtPrice(c.high)} | ${fmtPrice(c.low)} | ${fmtPrice(c.close)} | ${Math.round(c.volume).toLocaleString()} | ${sign}${chgPct}%`
+    );
+  }
+
+  return rows.join('\n');
+}
 
 // Key usage & health tracker
 let currentGeminiKeyIndex = 0;
@@ -138,54 +174,90 @@ async function callGeminiWithRotation(system: string, userPrompt: string, timeou
 }
 
 /**
- * v3.1 Primary Adversarial Chief Risk Officer (CRO) Gatekeeper — Gemini 3.6 Flash
- * Strict 5-point disqualification audit of trend pullback entries.
+ * v3.3 Autonomous Senior Quantitative Trader — Gemini 3.6 Flash
+ * Empowered with capital ownership ($10 wallet), raw 15m/5m candle sequences,
+ * and autonomous decision authority (direction, win probability, dynamic structural SL/TP).
  */
 export async function evaluateRiskVerdictWithGemini(params: RiskParams): Promise<RiskVerdict> {
   const system =
-    'You are the Chief Risk Officer (CRO) at a quantitative crypto hedge fund. ' +
-    'Your mission is to balance strict capital preservation with capturing high-probability intraday trading opportunities. ' +
-    'Audit candidate trades across 15m/5m timeframe confluence, price action, and reward-to-risk geometry. ' +
-    'VETO if any of the following severe flaws are present:\n' +
-    '1. EXHAUSTION / EXTENDED ENTRY: For LONG: 5m RSI > 72 or price chasing far above VWAP without pullback. For SHORT: 5m RSI < 28 or price chasing far below VWAP.\n' +
-    '2. ASYMMETRY DEFICIT: Planned Reward:Risk ratio is below 1.3:1.\n' +
-    '3. SQUEEZE RISK: Extreme one-sided funding rate (> +0.05% for longs or < -0.05% for shorts indicates squeeze trap).\n' +
-    '4. TOTAL DEAD AIR: Extreme chaotic chop with zero liquidity or momentum.\n\n' +
-    'APPROVE if the trade represents a clean trend pullback, range-bound mean-reversion at support/resistance, or momentum breakout with R:R >= 1.3:1.\n' +
+    'You are the Principal Quantitative Trader at a high-performance proprietary crypto fund. ' +
+    'You are trading YOUR OWN personal capital ($10.00 total wallet balance).\n\n' +
+    'CRITICAL CAPITAL REALITY:\n' +
+    '- Every single dollar in this wallet belongs to you. Every cent lost to bad trades or loose stops is PERMANENTLY GONE. There are no bailouts.\n' +
+    '- If your balance suffers drawdown, you will be ruined and shut down. Survival demands ironclad risk discipline.\n' +
+    '- You NEVER gamble into choppy noise, liquidity traps, or late FOMO momentum.\n' +
+    '- You ONLY risk capital when the raw market structure gives you a verified statistical edge (Win Probability >= 60%) with Reward:Risk >= 1.5:1.\n\n' +
+    'DATA HIERARCHY & SOURCE OF TRUTH:\n' +
+    '1. RAW CANDLESTICK DATA (15m & 5m OHLCV):\n' +
+    '   This is your PRIMARY SOURCE OF TRUTH. You must compute market structure, trend continuity, support/resistance levels, rejection wicks, and volume absorption from these raw candles yourself.\n' +
+    '2. ADVISORY SIGNALS (SECONDARY HEURISTICS):\n' +
+    '   Any indicator figures (RSI, VWAP, ADX, regime) provided in the prompt were computed by a simplistic local bot. THEY CAN BE WRONG, LAGGING, OR MISLEADING. Treat them strictly as advisory recommendations. NEVER trust them blindly over what the raw price action shows.\n\n' +
+    'YOUR AUTONOMOUS DECISION PROCESS:\n' +
+    '1. 15m Structure: Identify higher highs/lows vs lower highs/lows, macro trend, and key inflection levels.\n' +
+    '2. 5m Trigger: Inspect the last 3-5 candles. Look for rejection wicks, absorption, or clean pullbacks to support/VWAP. Avoid entering if price is exhausted or chasing far from value.\n' +
+    '3. Win Probability (0-100%): Honestly judge if this trade will actually be profitable before invalidation. If < 60%, STAND ASIDE.\n' +
+    '4. Structural Geometry: If executing, determine the exact structural invalidation level (stopLossPrice) just beyond the key swing/wick, and your realistic target (takeProfitPrice) at the next liquidity pool. Ensure Planned R:R >= 1.5:1.\n' +
+    '5. Final Decision: Output EXECUTE_LONG, EXECUTE_SHORT, or STAND_ASIDE.\n\n' +
     'Return ONLY valid JSON matching this schema:\n' +
     '{\n' +
-    '  "verdict": "APPROVE" | "VETO",\n' +
+    '  "decision": "EXECUTE_LONG" | "EXECUTE_SHORT" | "STAND_ASIDE",\n' +
     '  "confidence": number (0-100),\n' +
-    '  "disqualifiers": string[],\n' +
-    '  "reasoning": string\n' +
+    '  "winProbability": number (0-100),\n' +
+    '  "marketStructureAnalysis": "Concise 1-2 sentence breakdown of raw 15m & 5m price action",\n' +
+    '  "reasoning": "Why this trade will be profitable or why standing aside protects your capital",\n' +
+    '  "stopLossPrice": number,\n' +
+    '  "takeProfitPrice": number,\n' +
+    '  "plannedRR": number,\n' +
+    '  "disqualifiers": string[]\n' +
     '}';
 
+  const currentPrice = params.technicalBlock.currentPrice;
+  const fundingStr = params.fundingRate !== undefined ? (params.fundingRate * 100).toFixed(4) + '%' : 'Neutral';
+
   const user =
+    `=== YOUR CAPITAL STATUS ===\n` +
+    `Wallet Balance: $10.00 (YOUR REAL MONEY - PROTECT EVERY CENT)\n` +
+    `Position Sizing: $1.00 margin @ 3x leverage ($3.00 notional)\n` +
     `Asset: ${params.symbol}\n` +
-    `Direction: ${params.action}\n` +
-    `Current Price: ${params.technicalBlock.currentPrice}\n` +
-    `Planned Stop Loss: ${params.stopLossPrice} | Planned Take Profit: ${params.takeProfitPrice}\n` +
-    `Planned Reward:Risk Ratio: ${params.plannedRR.toFixed(2)}:1\n` +
-    `Funding Rate: ${params.fundingRate !== undefined ? (params.fundingRate * 100).toFixed(4) + '%' : 'Neutral'}\n` +
-    `15m Macro Regime: ${params.technicalBlock.regime15m} | 15m ADX: ${params.technicalBlock.adx15m.toFixed(1)} | 15m CHOP: ${params.technicalBlock.chop15m.toFixed(1)}\n` +
-    `5m Execution: RSI: ${params.technicalBlock.rsi5m.toFixed(1)} | VWAP: ${params.technicalBlock.vwap5m} | Volume Z-Score: ${params.technicalBlock.volumeZ5m.toFixed(2)} | ATR: ${params.technicalBlock.atr5m}\n\n` +
-    `Conduct your adversarial audit. Disqualify if fragile or crowded. Return JSON.`;
+    `Current Price: $${fmtPrice(currentPrice)}\n` +
+    `8h Funding Rate: ${fundingStr}\n\n` +
+    `=== RAW MARKET DATA (PRIMARY SOURCE OF TRUTH) ===\n` +
+    `${formatCandleSequence(params.candles15m || [], '15-Minute Macro Structure', 16)}\n\n` +
+    `${formatCandleSequence(params.candles5m || [], '5-Minute Trigger & Execution', 12)}\n\n` +
+    `=== ADVISORY RECOMMENDATIONS (LOCAL HEURISTICS - DO NOT TRUST BLINDLY) ===\n` +
+    `- Local Bot Suggested Direction: ${params.action}\n` +
+    `- Local Planned Stop Loss: $${fmtPrice(params.stopLossPrice)} | Take Profit: $${fmtPrice(params.takeProfitPrice)}\n` +
+    `- Local Planned R:R: ${params.plannedRR.toFixed(2)}:1\n` +
+    `- Local Advisory Indicators: 15m Regime: ${params.technicalBlock.regime15m} | ADX: ${params.technicalBlock.adx15m.toFixed(1)} | CHOP: ${params.technicalBlock.chop15m.toFixed(1)} | 5m RSI: ${params.technicalBlock.rsi5m.toFixed(1)} | VWAP: $${fmtPrice(params.technicalBlock.vwap5m)} | Vol Z-Score: ${params.technicalBlock.volumeZ5m.toFixed(2)} | ATR: $${fmtPrice(params.technicalBlock.atr5m)}\n\n` +
+    `=== YOUR TRADING DECISION ===\n` +
+    `Analyze the raw candles above. Is this trade truly going to be profitable?\n` +
+    `Are you willing to risk your own capital on it?\n` +
+    `Define your decision, structural stopLossPrice, takeProfitPrice, and estimated winProbability. Return JSON.`;
 
-  const parsed = await callGeminiWithRotation(system, user, 8000);
+  const parsed = await callGeminiWithRotation(system, user, 12000);
 
-  const verdict = (parsed.verdict === 'APPROVE' ? 'APPROVE' : 'VETO') as 'APPROVE' | 'VETO';
+  const decision = (parsed.decision || (parsed.verdict === 'APPROVE' ? (params.action === 'LONG' ? 'EXECUTE_LONG' : 'EXECUTE_SHORT') : 'STAND_ASIDE')) as AutonomousDecision;
+  const winProbability = typeof parsed.winProbability === 'number' ? parsed.winProbability : (parsed.verdict === 'APPROVE' ? 65 : 40);
   const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 50;
   const disqualifiers = Array.isArray(parsed.disqualifiers) ? parsed.disqualifiers : [];
-  const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : 'Gemini evaluated risk parameters.';
+  const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : 'Autonomous market analysis completed.';
+  const marketStructureAnalysis = typeof parsed.marketStructureAnalysis === 'string' ? parsed.marketStructureAnalysis : '';
 
-  const allocationUsd = verdict === 'APPROVE' ? (confidence > 75 ? 1.00 : 0.80) : 0;
+  // Capital ownership filter: Only approve trades where the Autonomous Trader decides to execute AND win probability >= 60%
+  const isApproved = (decision === 'EXECUTE_LONG' || decision === 'EXECUTE_SHORT') && winProbability >= 60;
+  const verdict = isApproved ? 'APPROVE' : 'VETO';
 
   return {
     verdict,
+    decision,
     confidence,
+    winProbability,
     disqualifiers,
     reasoning,
-    allocationUsd,
+    marketStructureAnalysis,
+    suggestedStopLoss: typeof parsed.stopLossPrice === 'number' && parsed.stopLossPrice > 0 ? parsed.stopLossPrice : undefined,
+    suggestedTakeProfit: typeof parsed.takeProfitPrice === 'number' && parsed.takeProfitPrice > 0 ? parsed.takeProfitPrice : undefined,
+    allocationUsd: isApproved ? 1.00 : 0,
   };
 }
 

@@ -16,6 +16,7 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const config_1 = require("./config");
 const groq_client_1 = require("./groq-client");
+const gemini_client_1 = require("./gemini-client");
 const supabase_logger_1 = require("./supabase-logger");
 const risk_governor_1 = require("./risk-governor");
 let currentFocusedCoin = 'None';
@@ -42,7 +43,7 @@ function startHttpServer(port = config_1.CONFIG.PORT) {
     const server = http_1.default.createServer(async (req, res) => {
         // Enable CORS for external dashboard consumption
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
         if (req.method === 'OPTIONS') {
             res.writeHead(204);
@@ -50,20 +51,73 @@ function startHttpServer(port = config_1.CONFIG.PORT) {
             return;
         }
         const urlPath = (req.url || '/').split('?')[0];
+        // ─── API: On-demand Test All Keys Endpoint ──────────────────────────────────
+        if (urlPath === '/api/test-keys' && req.method === 'POST') {
+            try {
+                console.log('[HTTP Server] 🧪 Running on-demand API key diagnostics...');
+                const results = await (0, gemini_client_1.pingAllGeminiKeys)();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, timestamp: new Date().toISOString(), results }));
+                return;
+            }
+            catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
+                return;
+            }
+        }
+        // ─── API: Reset Circuit Breaker Endpoint ───────────────────────────────────
+        if (urlPath === '/api/reset-circuit-breaker' && req.method === 'POST') {
+            try {
+                console.log('[HTTP Server] 🔄 Resetting daily risk circuit breaker...');
+                risk_governor_1.riskGovernor.resetDailyCircuitBreaker();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, message: 'Circuit breaker reset successfully. Trading unhalted.' }));
+                return;
+            }
+            catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
+                return;
+            }
+        }
+        // ─── API: Passive LLM Health Telemetry ──────────────────────────────────────
+        if (urlPath === '/api/llm-health') {
+            try {
+                const payload = {
+                    primary: (0, gemini_client_1.getGeminiTelemetry)(),
+                    fallback: {
+                        provider: 'Groq Cloud',
+                        model: config_1.CONFIG.GROQ_MODEL,
+                        ...(0, groq_client_1.getGroqUsageSummary)(),
+                    },
+                    timestamp: new Date().toISOString(),
+                };
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(payload, null, 2));
+                return;
+            }
+            catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+                return;
+            }
+        }
         // ─── Health / Ping Endpoint ────────────────────────────────────────────────
         if (urlPath === '/health' || urlPath === '/api/health') {
             try {
                 const wallet = await (0, supabase_logger_1.fetchWalletBalance)().catch(() => 0);
                 const openTrades = await (0, supabase_logger_1.fetchOpenFuturesTrades)().catch(() => []);
                 const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
+                const memStatus = (0, supabase_logger_1.getLatestInMemoryStatus)();
                 const health = {
                     status: 'HEALTHY',
                     service: 'focus-trading-engine',
                     version: config_1.CONFIG.VERSION,
-                    mode: config_1.CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.0)' : 'LIVE (v3.0)',
+                    mode: config_1.CONFIG.DRY_RUN ? 'DRY_RUN (Simulation v3.2)' : 'LIVE (v3.2)',
                     uptime_seconds: uptimeSeconds,
-                    cycle_count: engineCycleCount,
-                    focused_coin: currentFocusedCoin,
+                    cycle_count: engineCycleCount || memStatus.cycle_count || 1,
+                    focused_coin: (currentFocusedCoin && currentFocusedCoin !== 'None') ? currentFocusedCoin : (memStatus.focused_symbol || 'Scanning...'),
                     wallet_balance: wallet,
                     wallet_balance_inr: Math.round(wallet * 88.5 * 100) / 100,
                     inr_rate: 88.50,
@@ -74,7 +128,9 @@ function startHttpServer(port = config_1.CONFIG.PORT) {
                         entry: t.entry_price,
                         size: t.amount,
                     })),
+                    live_indicators: memStatus.live_indicators || {},
                     risk_governor: risk_governor_1.riskGovernor.getStatus(),
+                    gemini_cluster: (0, gemini_client_1.getGeminiTelemetry)(),
                     groq_cloud_llm: (0, groq_client_1.getGroqUsageSummary)(),
                     timestamp: new Date().toISOString(),
                 };

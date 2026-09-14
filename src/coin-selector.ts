@@ -28,11 +28,19 @@ export interface CoinCandidate {
   fundingRate?: number;   // 8h funding rate e.g. 0.0001
 }
 
-/** Compute volatility score for ranking */
-function scoreCandidate(change24h: number, volumeUsdt: number): number {
+const INSTITUTIONAL_PRIORITY_COINS = new Set([
+  'SOL', 'BTC', 'ETH', 'DOGE', 'XRP', 'SUI', 'LINK', 'AVAX',
+  'NEAR', 'ADA', 'BNB', 'APT', 'ARB', 'OP', 'PEPE', 'SHIB',
+  'TIA', 'RENDER', 'INJ', 'FET', 'ENA', 'WIF', 'SEI', 'AAVE',
+]);
+
+/** Compute volatility and liquidity score for ranking */
+function scoreCandidate(base: string, change24h: number, volumeUsdt: number): number {
   // Absolute 24h move × volume factor (log scale)
   const volFactor = Math.log10(Math.max(volumeUsdt, 1));
-  return Math.abs(change24h) * volFactor;
+  const baseScore = Math.abs(change24h) * volFactor;
+  // Modest boost for established institutional assets with deep order books
+  return INSTITUTIONAL_PRIORITY_COINS.has(base) ? baseScore * 1.3 : baseScore;
 }
 
 let lastSelectedSymbol: string | null = null;
@@ -53,6 +61,9 @@ export async function getTopCandidateBasket(limit: number = CONFIG.MAX_CANDIDATE
     if (!sym.endsWith('USDT')) continue;
     if (sym.startsWith('USDT') || sym.startsWith('USDC') || sym.startsWith('USD')) continue;
 
+    // Strict symbol format: only uppercase alphanumeric letters (rejects exotic/unicode coins like 龙虾USDT)
+    if (!/^[A-Z0-9]+USDT$/.test(sym)) continue;
+
     const base = sym.replace('USDT', '');
     if (TRADFI_BLOCKLIST.has(base)) continue;
 
@@ -64,7 +75,7 @@ export async function getTopCandidateBasket(limit: number = CONFIG.MAX_CANDIDATE
     const lastPrice  = parseFloat(t.lastPr   || '0');
     const volumeUsdt = parseFloat(t.usdtVolume || t.quoteVolume || '0');
 
-    // Strict Liquidity Floor ($5M USDT min 24h volume)
+    // Strict Liquidity Floor ($15M USDT min 24h volume)
     if (isNaN(change24h) || lastPrice <= 0 || volumeUsdt < CONFIG.MIN_VOLUME_USDT) continue;
 
     // Microstructure Spread Floor (<0.15%)
@@ -83,7 +94,7 @@ export async function getTopCandidateBasket(limit: number = CONFIG.MAX_CANDIDATE
       change24h,
       volumeUsdt,
       spreadPct,
-      score: scoreCandidate(change24h, volumeUsdt),
+      score: scoreCandidate(base, change24h, volumeUsdt),
     });
   }
 

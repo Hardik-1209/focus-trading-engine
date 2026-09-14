@@ -4,6 +4,7 @@
  * Seamless multi-key rotation across Groq array with rate-limit failover.
  */
 import { CONFIG } from './config';
+import type { Candle } from './indicators';
 
 export interface NarrativeScore {
   narrative_category: string;
@@ -11,12 +12,19 @@ export interface NarrativeScore {
   reasoning: string;
 }
 
+export type AutonomousDecision = 'EXECUTE_LONG' | 'EXECUTE_SHORT' | 'STAND_ASIDE';
+
 export interface RiskVerdict {
   verdict: 'APPROVE' | 'VETO';
+  decision: AutonomousDecision;
   confidence: number;
-  disqualifiers: string[];
+  winProbability: number;
   reasoning: string;
+  marketStructureAnalysis?: string;
+  suggestedStopLoss?: number;
+  suggestedTakeProfit?: number;
   allocationUsd: number;
+  disqualifiers: string[];
 }
 
 export interface RiskParams {
@@ -26,6 +34,9 @@ export interface RiskParams {
   stopLossPrice: number;
   takeProfitPrice: number;
   fundingRate?: number;
+  candles15m?: Candle[];
+  candles5m?: Candle[];
+  walletBalance?: number;
   technicalBlock: {
     rsi5m: number;
     atr5m: number;
@@ -35,6 +46,8 @@ export interface RiskParams {
     adx15m: number;
     chop15m: number;
     currentPrice: number;
+    swingLow?: number;
+    swingHigh?: number;
   };
 }
 
@@ -184,12 +197,22 @@ export async function evaluateRiskVerdictWithGroq(params: RiskParams): Promise<R
 
   const res = await callGroqWithRotation(system, user);
 
+  const verdictStr = res.verdict === 'APPROVE' ? 'APPROVE' : 'VETO';
+  const decision = (res.decision || (verdictStr === 'APPROVE' ? (params.action === 'LONG' ? 'EXECUTE_LONG' : 'EXECUTE_SHORT') : 'STAND_ASIDE')) as AutonomousDecision;
+  const winProb = typeof res.winProbability === 'number' ? res.winProbability : (verdictStr === 'APPROVE' ? 65 : 40);
+  const confidence = typeof res.confidence === 'number' ? res.confidence : 50;
+
   return {
-    verdict: res.verdict === 'APPROVE' ? 'APPROVE' : 'VETO',
-    confidence: typeof res.confidence === 'number' ? res.confidence : 50,
+    verdict: verdictStr,
+    decision,
+    confidence,
+    winProbability: winProb,
     disqualifiers: Array.isArray(res.disqualifiers) ? res.disqualifiers : [],
-    reasoning: res.reasoning || (res.verdict === 'APPROVE' ? 'Approved high-conviction confluence' : 'Disqualified by risk audit'),
-    allocationUsd: res.verdict === 'APPROVE' ? 100 : 0,
+    reasoning: res.reasoning || (verdictStr === 'APPROVE' ? 'Approved high-conviction confluence' : 'Disqualified by risk audit'),
+    marketStructureAnalysis: res.marketStructureAnalysis,
+    suggestedStopLoss: typeof res.stopLossPrice === 'number' ? res.stopLossPrice : undefined,
+    suggestedTakeProfit: typeof res.takeProfitPrice === 'number' ? res.takeProfitPrice : undefined,
+    allocationUsd: verdictStr === 'APPROVE' ? 1.00 : 0,
   };
 }
 

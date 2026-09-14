@@ -12,7 +12,7 @@ function optional(key: string, fallback: string): string {
 }
 
 export const CONFIG = {
-  VERSION:                   '3.2.0',
+  VERSION:                   '3.3.0',
   PORT:                      parseInt(optional('PORT', '3000')),
   SUPABASE_URL:              required('SUPABASE_URL'),
   SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY'),
@@ -42,7 +42,7 @@ export const CONFIG = {
   MAX_CANDIDATES_POOL:       15,        // Scan top 15 liquid candidates simultaneously
   MAX_CONCURRENT_POSITIONS:  4,         // Max 4 concurrent open trades
   DRY_RUN:                   optional('DRY_RUN', 'true') !== 'false',
-  MIN_VOLUME_USDT:           parseFloat(optional('MIN_VOLUME_USDT', '5000000')), // $5M minimum liquidity floor
+  MIN_VOLUME_USDT:           parseFloat(optional('MIN_VOLUME_USDT', '15000000')), // $15M institutional liquidity floor
   CLOUD_API_URL:             optional('CLOUD_API_URL', 'http://localhost:3001'),
   CLOUD_API_KEY:             optional('CLOUD_API_KEY', ''),
 } as const;
@@ -56,7 +56,7 @@ export const RISK = {
   // Dynamic ATR Geometry (Triple Barrier)
   STOP_LOSS_ATR_MULT: 1.6,     // Structural dynamic stop = 1.6 * ATR
   TAKE_PROFIT_ATR_MULT: 2.8,   // Target reward = 2.8 * ATR (Planned R:R >= 1.5:1)
-  BREAKEVEN_ATR_TRIGGER: 1.0,  // Move stop to breakeven + roundtrip fees at +1.0 * ATR profit
+  BREAKEVEN_ATR_TRIGGER: 1.8,  // Move stop to breakeven only at +1.8 * ATR profit (prevents premature choke)
   TRAILING_STOP_ATR_MULT: 1.6, // Trailing stop distance behind peak
   
   // Fee Structure
@@ -77,7 +77,7 @@ export const RISK = {
   // Risk Governor Safeguards
   CONSECUTIVE_LOSS_LIMIT: 2,   // 2 stop-outs on a symbol triggers cooldown
   SYMBOL_COOLDOWN_MS: 4 * 60 * 60 * 1000, // 4-hour cooldown for stopped-out coins
-  DAILY_MAX_DRAWDOWN_PCT: 0.05,// 5% account drawdown activates daily kill-switch
+  DAILY_MAX_DRAWDOWN_PCT: 0.15,// 15% ($1.50) daily max loss threshold for calibration phase
 } as const;
 
 export const SIGNAL = {

@@ -5,6 +5,7 @@ export declare function logHealth(params: {
     message: string;
     meta_data?: Record<string, any>;
 }): Promise<void>;
+export declare function getLatestInMemoryStatus(): Record<string, any>;
 export declare function updateEngineStatus(status: {
     focused_symbol?: string;
     cycle_count?: number;

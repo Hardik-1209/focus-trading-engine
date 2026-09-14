@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.logHealth = logHealth;
+exports.getLatestInMemoryStatus = getLatestInMemoryStatus;
 exports.updateEngineStatus = updateEngineStatus;
 exports.logMarketSignal = logMarketSignal;
 exports.fetchWalletBalance = fetchWalletBalance;
@@ -19,7 +20,10 @@ exports.logFocusEvent = logFocusEvent;
 const supabase_js_1 = require("@supabase/supabase-js");
 const config_1 = require("./config");
 const risk_governor_1 = require("./risk-governor");
-const supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.SUPABASE_URL, config_1.CONFIG.SUPABASE_SERVICE_ROLE_KEY);
+const gemini_client_1 = require("./gemini-client");
+const supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.SUPABASE_URL, config_1.CONFIG.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+});
 // ─── System Health ────────────────────────────────────────────────────────────
 async function logHealth(params) {
     try {
@@ -36,7 +40,16 @@ async function logHealth(params) {
         console.error(`[DB] Failed to log health event: ${err.message}`);
     }
 }
-// ─── Engine Status & Telemetry ────────────────────────────────────────────────
+// In-memory status cache for instantaneous <5ms /health responses
+let latestInMemoryStatus = {
+    id: 'primary',
+    is_running: true,
+    last_heartbeat: new Date().toISOString(),
+    live_indicators: {},
+};
+function getLatestInMemoryStatus() {
+    return latestInMemoryStatus;
+}
 async function updateEngineStatus(status) {
     try {
         // Calculate total trades metrics for active (unarchived) session
@@ -61,6 +74,7 @@ async function updateEngineStatus(status) {
         const mergedIndicators = {
             ...(status.live_indicators || {}),
             risk_governor: govStatus,
+            gemini_cluster: (0, gemini_client_1.getGeminiTelemetry)(),
         };
         const upsertData = {
             id: 'primary',
@@ -80,6 +94,7 @@ async function updateEngineStatus(status) {
             upsertData.active_trades_count = status.active_trades_count;
         if (status.active_groq_key_index !== undefined)
             upsertData.active_groq_key_index = status.active_groq_key_index;
+        latestInMemoryStatus = { ...latestInMemoryStatus, ...upsertData };
         await supabase.from('engine_status').upsert(upsertData);
     }
     catch (err) {

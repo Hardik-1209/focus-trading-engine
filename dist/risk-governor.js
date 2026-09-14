@@ -41,6 +41,15 @@ class RiskGovernor {
         }
     }
     /**
+     * Reset daily circuit breaker (unhalts trading and resets daily realized PnL counter).
+     */
+    resetDailyCircuitBreaker() {
+        this.dailyHalted = false;
+        this.dailyRealizedPnl = 0;
+        this.dailyResetDate = new Date().getUTCDate();
+        console.log('[Risk Governor] 🔄 Daily circuit breaker reset. Trading unhalted.');
+    }
+    /**
      * Evaluates whether an asset is permissible to trade.
      * Checks daily portfolio kill switch and symbol-level circuit breakers.
      */
@@ -168,7 +177,7 @@ class RiskGovernor {
             llmTotalEvaluations: this.llmTotal,
             llmApprovals: this.llmApproved,
             llmApprovalRate: parseFloat(approvalRate.toFixed(1)),
-            version: '3.0.0',
+            version: '3.3.0',
         };
     }
 }

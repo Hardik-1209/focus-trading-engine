@@ -8,6 +8,7 @@ export interface CoinCandidate {
     score: number;
     fundingRate?: number;
 }
+export declare function getTopCandidateBasket(limit?: number): Promise<CoinCandidate[]>;
 export declare function selectHottestCoin(): Promise<CoinCandidate>;
 /** Fetch latest REST price for a symbol */
 export declare function fetchCurrentPrice(symbol: string): Promise<number>;

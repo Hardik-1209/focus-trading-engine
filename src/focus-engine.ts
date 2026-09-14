@@ -175,8 +175,8 @@ async function evaluateCandidate(
 
     lastSignalTime.set(symbol, Date.now());
 
-    // 4. AI CRO Audit via Google Gemini 3.6 Flash
-    console.log(`[Engine v3.2] 🛡️ Routing setup on ${symbol} to Gemini 3.6 Flash CRO Audit...`);
+    // 4. Autonomous Senior Quant Trader Evaluation via Google Gemini 3.6 Flash
+    console.log(`[Engine v3.3] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader...`);
     const verdict = await evaluateRiskVerdict({
       symbol,
       action: signal.action,
@@ -184,6 +184,9 @@ async function evaluateCandidate(
       stopLossPrice: signal.stopLossPrice,
       takeProfitPrice: signal.takeProfitPrice,
       fundingRate: candidate.fundingRate,
+      candles15m: c15m,
+      candles5m: c5m,
+      walletBalance: 10.00,
       technicalBlock: {
         rsi5m: signal.indicators.rsi5m,
         atr5m: signal.indicators.atr5m,
@@ -193,6 +196,8 @@ async function evaluateCandidate(
         adx15m: signal.indicators.adx15m,
         chop15m: signal.indicators.chop15m,
         currentPrice,
+        swingLow: signal.indicators.swingLow,
+        swingHigh: signal.indicators.swingHigh,
       },
     });
 
@@ -208,27 +213,63 @@ async function evaluateCandidate(
       llm_source: verdict.llmSource,
       confidence: verdict.confidence,
       indicators: signal.indicators as any,
-      reason: `${signal.reason} | CRO Verdict: ${verdict.verdict} (${verdict.reasoning})`,
+      reason: `${signal.reason} | Trader Decision: ${verdict.decision} (WinProb: ${verdict.winProbability}%) | Analysis: ${verdict.marketStructureAnalysis || ''} | Reason: ${verdict.reasoning}`,
     });
 
     if (approved) {
-      console.log(`[Engine v3.2] 🎯 CRO AUDIT PASSED (${verdict.confidence}/100): Executing ${signal.action} on ${symbol}!`);
+      let finalAction = signal.action;
+      if (verdict.decision === 'EXECUTE_LONG') finalAction = 'LONG';
+      if (verdict.decision === 'EXECUTE_SHORT') finalAction = 'SHORT';
+
+      let finalStopLoss = signal.stopLossPrice;
+      let finalTakeProfit = signal.takeProfitPrice;
+
+      // Sanity check structural SL from LLM:
+      if (verdict.suggestedStopLoss && verdict.suggestedStopLoss > 0) {
+        if (finalAction === 'LONG') {
+          const slDistPct = (currentPrice - verdict.suggestedStopLoss) / currentPrice;
+          if (slDistPct >= 0.005 && slDistPct <= 0.045) {
+            finalStopLoss = verdict.suggestedStopLoss;
+            console.log(`[Engine v3.3] 🎯 Using Gemini Structural Stop Loss @ $${finalStopLoss.toFixed(4)} (-${(slDistPct * 100).toFixed(2)}%)`);
+          }
+        } else if (finalAction === 'SHORT') {
+          const slDistPct = (verdict.suggestedStopLoss - currentPrice) / currentPrice;
+          if (slDistPct >= 0.005 && slDistPct <= 0.045) {
+            finalStopLoss = verdict.suggestedStopLoss;
+            console.log(`[Engine v3.3] 🎯 Using Gemini Structural Stop Loss @ $${finalStopLoss.toFixed(4)} (-${(slDistPct * 100).toFixed(2)}%)`);
+          }
+        }
+      }
+
+      if (verdict.suggestedTakeProfit && verdict.suggestedTakeProfit > 0) {
+        if (finalAction === 'LONG' && verdict.suggestedTakeProfit > currentPrice) {
+          finalTakeProfit = verdict.suggestedTakeProfit;
+        } else if (finalAction === 'SHORT' && verdict.suggestedTakeProfit < currentPrice) {
+          finalTakeProfit = verdict.suggestedTakeProfit;
+        }
+      }
+
+      const riskDist = Math.abs(currentPrice - finalStopLoss);
+      const rewardDist = Math.abs(finalTakeProfit - currentPrice);
+      const finalRR = riskDist > 0 ? parseFloat((rewardDist / riskDist).toFixed(2)) : signal.plannedRR;
+
+      console.log(`[Engine v3.3] 🎯 TRADE APPROVED BY QUANT TRADER (${verdict.decision} | WinProb: ${verdict.winProbability}% | Conf: ${verdict.confidence}/100): Executing ${finalAction} on ${symbol}!`);
 
       await executeTrade(
         symbol,
-        signal.action,
+        finalAction,
         currentPrice,
-        signal.stopLossPrice,
-        signal.takeProfitPrice,
+        finalStopLoss,
+        finalTakeProfit,
         signal.atr,
-        signal.plannedRR,
+        finalRR,
         verdict.llmSource,
         llmReasoning,
         signal.indicators
       );
       return true;
     } else {
-      console.log(`[Engine v3.2] ❌ Vetoed by CRO on ${symbol} (${verdict.reasoning}). Capital protected.`);
+      console.log(`[Engine v3.3] 🛡️ Trader stood aside on ${symbol} (Decision: ${verdict.decision}, WinProb: ${verdict.winProbability}%). Capital protected.`);
       return false;
     }
 
@@ -273,25 +314,26 @@ function startPositionGuardianWatchdog() {
 
 /** Main High-Cadence Concurrent Trading Loop */
 export async function runFocusEngine() {
-  console.log('\n🤖 Focus Trading Engine v3.2 starting (High-Cadence Basket Scanner)...');
+  console.log('\n🤖 Focus Trading Engine v3.3 starting (Autonomous Senior Quant Trader + Raw Candles)...');
   await syncOpenPositions();
   startPositionGuardianWatchdog();
 
-  // Initialize Risk Governor starting balance
+  // Initialize Risk Governor starting balance and reset circuit breaker on deployment
   const initialWallet = await fetchWalletBalance().catch(() => 10.00);
   riskGovernor.setStartingBalance(initialWallet);
+  riskGovernor.resetDailyCircuitBreaker();
 
   let cycleCount = await fetchCurrentEngineCycle();
 
   while (true) {
     cycleCount++;
-    console.log(`\n[Engine v3.2] ━━━ Scan Cycle #${cycleCount} ━━━`);
+    console.log(`\n[Engine v3.3] ━━━ Scan Cycle #${cycleCount} ━━━`);
     displayActiveTrades();
 
     // 1. Check Daily Drawdown Circuit Breaker
     const govStatus = riskGovernor.getStatus();
     if (govStatus.dailyHalted) {
-      console.warn(`[Engine v3.2] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
+      console.warn(`[Engine v3.3] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
       await sleep(60000);
       continue;
     }

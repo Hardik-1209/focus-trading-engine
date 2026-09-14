@@ -61,9 +61,12 @@ export async function evaluateRiskVerdict(
     const approved = result.verdict === 'APPROVE';
     riskGovernor.recordLlmDecision(approved);
 
-    console.log(`[LLM Router v3.1 CRO] ⚡ Verdict via Gemini 3.6 Flash for ${params.symbol}: ${result.verdict} (${result.confidence}/100)`);
+    console.log(`[LLM Router v3.3 Trader] ⚡ Decision via Gemini 3.6 Flash for ${params.symbol}: ${result.decision} | Verdict: ${result.verdict} (WinProb: ${result.winProbability}%, Conf: ${result.confidence}/100)`);
+    if (result.marketStructureAnalysis) {
+      console.log(`[LLM Router v3.3 Trader] 📊 Gemini Market Structure: ${result.marketStructureAnalysis}`);
+    }
     if (!approved && result.disqualifiers.length > 0) {
-      console.log(`[LLM Router v3.1 CRO] 🛑 Gemini Veto reason: ${result.disqualifiers.join(', ')}`);
+      console.log(`[LLM Router v3.3 Trader] 🛑 Gemini Veto reason: ${result.disqualifiers.join(', ')}`);
     }
 
     return { ...result, llmSource: 'gemini' };
@@ -77,9 +80,9 @@ export async function evaluateRiskVerdict(
     const approved = result.verdict === 'APPROVE';
     riskGovernor.recordLlmDecision(approved);
 
-    console.log(`[LLM Router v3.1 CRO] 🛡️ Verdict via Groq Failover for ${params.symbol}: ${result.verdict} (${result.confidence}/100)`);
+    console.log(`[LLM Router v3.3 Trader] 🛡️ Decision via Groq Failover for ${params.symbol}: ${result.decision} | Verdict: ${result.verdict} (WinProb: ${result.winProbability}%, Conf: ${result.confidence}/100)`);
     if (!approved && result.disqualifiers.length > 0) {
-      console.log(`[LLM Router v3.1 CRO] 🛑 Groq Veto reason: ${result.disqualifiers.join(', ')}`);
+      console.log(`[LLM Router v3.3 Trader] 🛑 Groq Veto reason: ${result.disqualifiers.join(', ')}`);
     }
 
     return { ...result, llmSource: 'groq' };
@@ -96,7 +99,9 @@ export async function evaluateRiskVerdict(
 
   return {
     verdict: fallbackApproved ? 'APPROVE' : 'VETO',
+    decision: fallbackApproved ? (params.action === 'LONG' ? 'EXECUTE_LONG' : 'EXECUTE_SHORT') : 'STAND_ASIDE',
     confidence: fallbackApproved ? 75 : 30,
+    winProbability: fallbackApproved ? 65 : 35,
     disqualifiers: fallbackApproved ? [] : ['RULE_FALLBACK_FAILED'],
     allocationUsd: fallbackApproved ? 1.00 : 0,
     reasoning: `Quantitative rule fallback: ${fallbackApproved ? 'Passed strict MTF parameters' : 'Failed MTF parameters'}`,

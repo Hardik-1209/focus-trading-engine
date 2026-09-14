@@ -35,6 +35,10 @@ declare class RiskGovernor {
     private checkDayRoll;
     setStartingBalance(balance: number): void;
     /**
+     * Reset daily circuit breaker (unhalts trading and resets daily realized PnL counter).
+     */
+    resetDailyCircuitBreaker(): void;
+    /**
      * Evaluates whether an asset is permissible to trade.
      * Checks daily portfolio kill switch and symbol-level circuit breakers.
      */

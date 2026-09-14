@@ -67,6 +67,21 @@ export function startHttpServer(port = CONFIG.PORT): http.Server {
       }
     }
 
+    // ─── API: Reset Circuit Breaker Endpoint ───────────────────────────────────
+    if (urlPath === '/api/reset-circuit-breaker' && req.method === 'POST') {
+      try {
+        console.log('[HTTP Server] 🔄 Resetting daily risk circuit breaker...');
+        riskGovernor.resetDailyCircuitBreaker();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Circuit breaker reset successfully. Trading unhalted.' }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+        return;
+      }
+    }
+
     // ─── API: Passive LLM Health Telemetry ──────────────────────────────────────
     if (urlPath === '/api/llm-health') {
       try {

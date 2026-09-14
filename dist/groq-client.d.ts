@@ -1,14 +1,21 @@
+import type { Candle } from './indicators';
 export interface NarrativeScore {
     narrative_category: string;
     confidence_score: number;
     reasoning: string;
 }
+export type AutonomousDecision = 'EXECUTE_LONG' | 'EXECUTE_SHORT' | 'STAND_ASIDE';
 export interface RiskVerdict {
     verdict: 'APPROVE' | 'VETO';
+    decision: AutonomousDecision;
     confidence: number;
-    disqualifiers: string[];
+    winProbability: number;
     reasoning: string;
+    marketStructureAnalysis?: string;
+    suggestedStopLoss?: number;
+    suggestedTakeProfit?: number;
     allocationUsd: number;
+    disqualifiers: string[];
 }
 export interface RiskParams {
     symbol: string;
@@ -17,6 +24,9 @@ export interface RiskParams {
     stopLossPrice: number;
     takeProfitPrice: number;
     fundingRate?: number;
+    candles15m?: Candle[];
+    candles5m?: Candle[];
+    walletBalance?: number;
     technicalBlock: {
         rsi5m: number;
         atr5m: number;
@@ -26,6 +36,8 @@ export interface RiskParams {
         adx15m: number;
         chop15m: number;
         currentPrice: number;
+        swingLow?: number;
+        swingHigh?: number;
     };
 }
 export declare function evaluateNarrativeWithGroq(symbol: string, description: string, skillContext?: string): Promise<NarrativeScore>;
