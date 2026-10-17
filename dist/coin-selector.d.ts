@@ -12,6 +12,6 @@ export declare function getTopCandidateBasket(limit?: number): Promise<CoinCandi
 export declare function selectHottestCoin(): Promise<CoinCandidate>;
 /** Fetch latest REST price for a symbol */
 export declare function fetchCurrentPrice(symbol: string): Promise<number>;
-/** Fetch last N candles via REST (bootstrap only — after this we stream) */
+/** Fetch last N candles via REST (uses live candles endpoint to include current forming candle) */
 export declare function fetchBootstrapCandles(symbol: string, limit?: number, granularity?: '1m' | '5m' | '15m' | '30m' | '1H'): Promise<any[]>;
 //# sourceMappingURL=coin-selector.d.ts.map

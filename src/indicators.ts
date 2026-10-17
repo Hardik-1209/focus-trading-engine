@@ -276,24 +276,24 @@ export function computeRegime15m(candles15m: Candle[]): {
 
   const last = closes.length - 1;
   const price = closes[last];
-  const ema21 = ema21Arr[last] || price;
-  const ema50 = ema50Arr[last] || price;
-  const adx15m = adxArr[last] || 20;
+  const ema21 = !isNaN(ema21Arr[last]) ? ema21Arr[last] : price;
+  const ema50 = !isNaN(ema50Arr[last]) ? ema50Arr[last] : (!isNaN(ema21Arr[last]) ? ema21Arr[last] : price);
+  const adx15m = !isNaN(adxArr[last]) ? adxArr[last] : 20;
   const chop15m = !isNaN(chopArr[last]) ? chopArr[last] : 50;
-  const vwap15m = vwapArr[last] || price;
+  const vwap15m = !isNaN(vwapArr[last]) ? vwapArr[last] : price;
 
   // High Volatility Chop
-  if (chop15m > 58 || adx15m < 20) {
+  if (chop15m > 58 || adx15m < 18) {
     return { regime: 'VOLATILE_CHOP', ema21, ema50, adx15m, chop15m, vwap15m };
   }
 
-  // Bullish Trend
-  if (ema21 > ema50 && price >= ema21 && price >= vwap15m && adx15m >= 22) {
+  // Bullish Trend (EMA21 > EMA50, ADX >= 20, and price holding structure above/near EMA21 or VWAP)
+  if (ema21 > ema50 && adx15m >= 20 && (price >= (ema21 * 0.992) || price >= vwap15m)) {
     return { regime: 'TRENDING_BULL', ema21, ema50, adx15m, chop15m, vwap15m };
   }
 
-  // Bearish Trend
-  if (ema21 < ema50 && price <= ema21 && price <= vwap15m && adx15m >= 22) {
+  // Bearish Trend (EMA21 < EMA50, ADX >= 20, and price holding structure below/near EMA21 or VWAP)
+  if (ema21 < ema50 && adx15m >= 20 && (price <= (ema21 * 1.008) || price <= vwap15m)) {
     return { regime: 'TRENDING_BEAR', ema21, ema50, adx15m, chop15m, vwap15m };
   }
 

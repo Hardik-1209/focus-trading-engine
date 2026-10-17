@@ -73,9 +73,9 @@ async function getCandlesWithCache(symbol: string): Promise<{
   }
 
   const [c5m, c15m, native1h] = await Promise.all([
-    fetchBootstrapCandles(symbol, 40, '5m'),
-    fetchBootstrapCandles(symbol, 40, '15m'),
-    fetchBootstrapCandles(symbol, 12, '1H').catch(() => []),
+    fetchBootstrapCandles(symbol, 100, '5m'),
+    fetchBootstrapCandles(symbol, 100, '15m'),
+    fetchBootstrapCandles(symbol, 30, '1H').catch(() => []),
   ]);
 
   const c30m = aggregateCandles(c15m, 30);
@@ -183,7 +183,7 @@ async function evaluateCandidate(
     if (c5m.length < 20 || c15m.length < 20) return false;
 
     const latestCandle = c5m[c5m.length - 1];
-    const currentPrice = latestCandle.close;
+    const currentPrice = candidate.lastPrice > 0 ? candidate.lastPrice : latestCandle.close;
 
     // 3. Quantitative Tri-Setup Signal Detection (with Macro 24h Trend Gate)
     const signal = detectSignal(c5m, currentPrice, c15m, candidate.change24h);
@@ -192,13 +192,13 @@ async function evaluateCandidate(
       return false;
     }
 
-    console.log(`\n[Engine v3.4] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1 | 24h: ${candidate.change24h > 0 ? '+' : ''}${candidate.change24h.toFixed(1)}%`);
-    console.log(`[Engine v3.4] Setup: ${signal.reason}`);
+    console.log(`\n[Engine v3.5] 🔔 Opportunity Detected on ${symbol}! Action: ${signal.action} | Planned RR: ${signal.plannedRR}:1 | 24h: ${candidate.change24h > 0 ? '+' : ''}${candidate.change24h.toFixed(1)}%`);
+    console.log(`[Engine v3.5] Setup: ${signal.reason}`);
 
     lastSignalTime.set(symbol, Date.now());
 
     // 4. Autonomous Senior Quant Trader Evaluation via Google Gemini 3.6 Flash
-    console.log(`[Engine v3.4] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader (1H, 30m, 15m, 5m MTF)...`);
+    console.log(`[Engine v3.5] 🧠 Routing setup on ${symbol} to Gemini 3.6 Flash Autonomous Trader (1H, 30m, 15m, 5m MTF)...`);
     const verdict = await evaluateRiskVerdict({
       symbol,
       action: signal.action,
@@ -242,35 +242,42 @@ async function evaluateCandidate(
     });
 
     if (approved) {
-      let finalAction = signal.action;
-      if (verdict.decision === 'EXECUTE_LONG') finalAction = 'LONG';
-      if (verdict.decision === 'EXECUTE_SHORT') finalAction = 'SHORT';
+      // Direction mismatch guard
+      if (
+        (verdict.decision === 'EXECUTE_LONG' && signal.action !== 'LONG') ||
+        (verdict.decision === 'EXECUTE_SHORT' && signal.action !== 'SHORT')
+      ) {
+        console.warn(`[Engine v3.5] 🛑 Direction mismatch: Signal was ${signal.action} but LLM suggested ${verdict.decision}. Vetoed for safety.`);
+        return false;
+      }
 
+      let finalAction = signal.action;
       let finalStopLoss = signal.stopLossPrice;
       let finalTakeProfit = signal.takeProfitPrice;
 
-      // Sanity check structural SL from LLM:
-      if (verdict.suggestedStopLoss && verdict.suggestedStopLoss > 0) {
-        if (finalAction === 'LONG') {
-          const slDistPct = (currentPrice - verdict.suggestedStopLoss) / currentPrice;
-          if (slDistPct >= 0.005 && slDistPct <= 0.045) {
-            finalStopLoss = verdict.suggestedStopLoss;
-            console.log(`[Engine v3.3] 🎯 Using Gemini Structural Stop Loss @ $${finalStopLoss.toFixed(4)} (-${(slDistPct * 100).toFixed(2)}%)`);
-          }
-        } else if (finalAction === 'SHORT') {
-          const slDistPct = (verdict.suggestedStopLoss - currentPrice) / currentPrice;
-          if (slDistPct >= 0.005 && slDistPct <= 0.045) {
-            finalStopLoss = verdict.suggestedStopLoss;
-            console.log(`[Engine v3.3] 🎯 Using Gemini Structural Stop Loss @ $${finalStopLoss.toFixed(4)} (-${(slDistPct * 100).toFixed(2)}%)`);
-          }
-        }
-      }
+      // Validate LLM suggested SL/TP against strict risk floors
+      if (verdict.suggestedStopLoss && verdict.suggestedTakeProfit) {
+        const candSL = verdict.suggestedStopLoss;
+        const candTP = verdict.suggestedTakeProfit;
+        const candRisk = Math.abs(currentPrice - candSL);
+        const candReward = Math.abs(candTP - currentPrice);
+        const candRR = candRisk > 0 ? parseFloat((candReward / candRisk).toFixed(2)) : 0;
+        const candSlPct = candRisk / currentPrice;
+        const candTpPct = candReward / currentPrice;
 
-      if (verdict.suggestedTakeProfit && verdict.suggestedTakeProfit > 0) {
-        if (finalAction === 'LONG' && verdict.suggestedTakeProfit > currentPrice) {
-          finalTakeProfit = verdict.suggestedTakeProfit;
-        } else if (finalAction === 'SHORT' && verdict.suggestedTakeProfit < currentPrice) {
-          finalTakeProfit = verdict.suggestedTakeProfit;
+        if (
+          candRR >= RISK.MIN_PLANNED_RR &&
+          candSlPct >= RISK.MIN_STOP_LOSS_PCT &&
+          candSlPct <= 0.045 &&
+          candTpPct >= RISK.MIN_TAKE_PROFIT_PCT &&
+          ((finalAction === 'LONG' && candSL < currentPrice && candTP > currentPrice) ||
+           (finalAction === 'SHORT' && candSL > currentPrice && candTP < currentPrice))
+        ) {
+          finalStopLoss = candSL;
+          finalTakeProfit = candTP;
+          console.log(`[Engine v3.5] 🎯 Using Validated Gemini Structural SL: $${finalStopLoss.toFixed(4)} (${(candSlPct*100).toFixed(2)}%), TP: $${finalTakeProfit.toFixed(4)} (${(candTpPct*100).toFixed(2)}%), RR: ${candRR}:1`);
+        } else {
+          console.log(`[Engine v3.5] ⚠️ Gemini suggested SL/TP violated risk floors (RR: ${candRR}:1, SL: ${(candSlPct*100).toFixed(2)}%, TP: ${(candTpPct*100).toFixed(2)}%). Retaining quantitative levels (SL: $${finalStopLoss.toFixed(4)}, TP: $${finalTakeProfit.toFixed(4)}, RR: ${signal.plannedRR}:1).`);
         }
       }
 
@@ -278,7 +285,7 @@ async function evaluateCandidate(
       const rewardDist = Math.abs(finalTakeProfit - currentPrice);
       const finalRR = riskDist > 0 ? parseFloat((rewardDist / riskDist).toFixed(2)) : signal.plannedRR;
 
-      console.log(`[Engine v3.3] 🎯 TRADE APPROVED BY QUANT TRADER (${verdict.decision} | WinProb: ${verdict.winProbability}% | Conf: ${verdict.confidence}/100): Executing ${finalAction} on ${symbol}!`);
+      console.log(`[Engine v3.5] 🎯 TRADE APPROVED BY QUANT TRADER (${verdict.decision} | WinProb: ${verdict.winProbability}% | Conf: ${verdict.confidence}/100): Executing ${finalAction} on ${symbol}!`);
 
       await executeTrade(
         symbol,
@@ -311,17 +318,21 @@ function startPositionGuardianWatchdog() {
     if (activeCount === 0) return;
 
     try {
+      const positions = getActivePositionsList();
       const basket = await getTopCandidateBasket(30).catch(() => []);
       const priceMap = new Map<string, number>();
       for (const b of basket) {
         priceMap.set(b.symbol, b.lastPrice);
       }
 
-      for (const [sym, _] of lastSignalTime.entries()) {
-        const price = priceMap.get(sym);
-        if (price) {
+      for (const pos of positions) {
+        let price = priceMap.get(pos.symbol);
+        if (!price || price <= 0) {
+          price = await fetchCurrentPrice(pos.symbol).catch(() => 0);
+        }
+        if (price && price > 0) {
           onTick({
-            symbol: sym,
+            symbol: pos.symbol,
             lastPrice: price,
             bestBid: price,
             bestAsk: price,
@@ -340,10 +351,10 @@ function startPositionGuardianWatchdog() {
 let isAiGuardianRunning = false;
 
 /**
- * v3.4 Active AI Position Guardian Loop
+ * v3.5 Active AI Position Guardian Loop
  * Periodically reviews open positions every 60s against latest 5m/15m candles.
- * If market structure breaks down, executes AI_EARLY_EXIT to cut losses early
- * instead of passively waiting for a full stop loss hit.
+ * Requires at least 6 minutes (MIN_HOLD_BEFORE_AI_REVIEW_SEC) of post-entry trade development
+ * and enforces MIN_AI_EXIT_MOVE_PCT to prevent fee churn on noise.
  */
 function startAiPositionGuardianLoop() {
   setInterval(async () => {
@@ -357,22 +368,27 @@ function startAiPositionGuardianLoop() {
         if (pos.isClosing) continue;
 
         const ageSec = (Date.now() - pos.openedAt) / 1000;
-        // Allow trade at least 90s to develop before AI structural check
-        if (ageSec < 90) continue;
+        // Allow trade at least MIN_HOLD_BEFORE_AI_REVIEW_SEC (6 minutes) to develop before AI structural check
+        if (ageSec < RISK.MIN_HOLD_BEFORE_AI_REVIEW_SEC) continue;
 
         try {
           const { c5m, c15m } = await getCandlesWithCache(pos.symbol);
           if (c5m.length < 10 || c15m.length < 10) continue;
 
-          const latestCandle = c5m[c5m.length - 1];
-          const currentPrice = latestCandle.close;
+          const currentPrice = await fetchCurrentPrice(pos.symbol).catch(() => c5m[c5m.length - 1].close);
 
-          console.log(`[AI Guardian v3.4] 🧠 Reviewing open position ${pos.symbol} [${pos.positionSide}] (Age: ${Math.round(ageSec / 60)}m, Price: $${currentPrice})...`);
+          console.log(`[AI Guardian v3.5] 🧠 Reviewing open position ${pos.symbol} [${pos.positionSide}] (Age: ${Math.round(ageSec / 60)}m, Price: $${currentPrice})...`);
           const review = await evaluateOpenPosition(pos, currentPrice, c5m, c15m);
 
-          console.log(`[AI Guardian v3.4] ➤ ${pos.symbol} Review Verdict: ${review.action} [${review.llmSource}] | Reason: ${review.reason}`);
+          console.log(`[AI Guardian v3.5] ➤ ${pos.symbol} Review Verdict: ${review.action} [${review.llmSource}] | Reason: ${review.reason}`);
 
           if (review.action === 'EXIT') {
+            // Noise floor protection: Do not cut trade if price has moved < 0.35% (prevents donating fees)
+            const movePct = Math.abs(currentPrice - pos.entryPrice) / pos.entryPrice;
+            if (movePct < RISK.MIN_AI_EXIT_MOVE_PCT) {
+              console.log(`[AI Guardian v3.5] 🛡️ Vetoed premature AI_EARLY_EXIT on ${pos.symbol}: move (${(movePct * 100).toFixed(2)}%) < ${(RISK.MIN_AI_EXIT_MOVE_PCT * 100).toFixed(2)}% noise floor. Holding.`);
+              continue;
+            }
             await closePosition(pos, currentPrice, `AI_EARLY_EXIT: [${review.llmSource}] ${review.reason}`);
           } else if (review.action === 'TIGHTEN_STOP' && review.newStopLoss) {
             updatePositionStopLoss(pos.symbol, review.newStopLoss);
@@ -392,7 +408,7 @@ function startAiPositionGuardianLoop() {
 
 /** Main High-Cadence Concurrent Trading Loop */
 export async function runFocusEngine() {
-  console.log('\n🤖 Focus Trading Engine v3.4 starting (Autonomous Quant Trader + Active AI Guardian + Macro Protection)...');
+  console.log('\n🤖 Focus Trading Engine v3.5 starting (Autonomous Quant Trader + Active AI Guardian + Macro Protection)...');
   await syncOpenPositions();
   startPositionGuardianWatchdog();
   startAiPositionGuardianLoop();
@@ -406,13 +422,13 @@ export async function runFocusEngine() {
 
   while (true) {
     cycleCount++;
-    console.log(`\n[Engine v3.3] ━━━ Scan Cycle #${cycleCount} ━━━`);
+    console.log(`\n[Engine v3.5] ━━━ Scan Cycle #${cycleCount} ━━━`);
     displayActiveTrades();
 
     // 1. Check Daily Drawdown Circuit Breaker
     const govStatus = riskGovernor.getStatus();
     if (govStatus.dailyHalted) {
-      console.warn(`[Engine v3.3] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
+      console.warn(`[Engine v3.5] 🛑 DAILY DRAWDOWN KILL SWITCH ACTIVE. Waiting 60s for next UTC day...`);
       await sleep(60000);
       continue;
     }

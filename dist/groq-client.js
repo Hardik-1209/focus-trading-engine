@@ -173,7 +173,9 @@ async function evaluateRiskVerdictWithGroq(params) {
  */
 async function evaluateOpenPositionWithGroq(pos, currentPrice, candles5m, candles15m) {
     const system = 'You are an adversarial Quantitative Risk Officer monitoring an ACTIVE OPEN TRADE. ' +
-        'Determine if the trade thesis is broken (EXIT), ready to lock profits (TIGHTEN_STOP), or still healthy (HOLD). ' +
+        'The position was entered on a pullback or mean-reversion setup, so pre-entry movement against the trade was EXPECTED. ' +
+        'Only output EXIT if post-entry candles show decisive structural breakdown. ' +
+        'Never exit if price is fluctuating within +/- 0.4% of entry, as fees will destroy the trade. Default to HOLD while developing. ' +
         'Return ONLY JSON: {"action":"HOLD"|"EXIT"|"TIGHTEN_STOP","reason":"string","newStopLoss":number}';
     const minutesHeld = Math.max(1, Math.round((Date.now() - pos.openedAt) / 60000));
     const priceDiff = pos.positionSide === 'LONG' ? (currentPrice - pos.entryPrice) : (pos.entryPrice - currentPrice);
@@ -183,7 +185,7 @@ async function evaluateOpenPositionWithGroq(pos, currentPrice, candles5m, candle
         `Unrealized Return: ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% | Held: ${minutesHeld}m\n` +
         `Current SL: $${pos.stopLossPrice || 0} | TP: $${pos.takeProfitPrice || 0}\n` +
         `Recent 5m closes: ${candles5m.slice(-6).map(c => c.close).join(', ')}\n` +
-        `If market structure broke against this trade, return EXIT to cut losses early. Return JSON.`;
+        `Inspect the price action since entry. Has market structure decisively broken against the trade? Return JSON.`;
     try {
         const res = await callGroqWithRotation(system, user, 6000);
         const action = (res.action === 'EXIT' || res.action === 'TIGHTEN_STOP' || res.action === 'HOLD') ? res.action : 'HOLD';

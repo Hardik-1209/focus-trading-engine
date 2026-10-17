@@ -106,15 +106,23 @@ export function detectSignal(
     currentPrice,
   };
 
-  // Helper to enforce Macro Trend Gates before returning any actionable signal
+  // Helper to enforce Macro Trend Gates and Minimum Distance Floors before returning any actionable signal
   function buildLongSignal(
     stopLossPrice: number,
     takeProfitPrice: number,
     plannedRR: number,
     reason: string
   ): DetectedSignal {
-    if (plannedRR < 1.4) {
-      return mkWait(`Planned R:R too low (${plannedRR}:1 < 1.4:1)`, currentPrice, regime, ind);
+    if (plannedRR < RISK.MIN_PLANNED_RR) {
+      return mkWait(`Planned R:R too low (${plannedRR}:1 < ${RISK.MIN_PLANNED_RR}:1)`, currentPrice, regime, ind);
+    }
+    const stopDistPct = (currentPrice - stopLossPrice) / currentPrice;
+    if (stopDistPct < RISK.MIN_STOP_LOSS_PCT) {
+      return mkWait(`Stop distance too tight (${(stopDistPct * 100).toFixed(2)}% < ${(RISK.MIN_STOP_LOSS_PCT * 100).toFixed(2)}%). Capital protected from fee trap.`, currentPrice, regime, ind);
+    }
+    const targetDistPct = (takeProfitPrice - currentPrice) / currentPrice;
+    if (targetDistPct < RISK.MIN_TAKE_PROFIT_PCT) {
+      return mkWait(`Target distance too small (${(targetDistPct * 100).toFixed(2)}% < ${(RISK.MIN_TAKE_PROFIT_PCT * 100).toFixed(2)}%). Fees would eat profits.`, currentPrice, regime, ind);
     }
     // FALLING KNIFE / MACRO DOWNTREND VETO
     if (change24h < -4.0) {
@@ -143,8 +151,16 @@ export function detectSignal(
     plannedRR: number,
     reason: string
   ): DetectedSignal {
-    if (plannedRR < 1.4) {
-      return mkWait(`Planned R:R too low (${plannedRR}:1 < 1.4:1)`, currentPrice, regime, ind);
+    if (plannedRR < RISK.MIN_PLANNED_RR) {
+      return mkWait(`Planned R:R too low (${plannedRR}:1 < ${RISK.MIN_PLANNED_RR}:1)`, currentPrice, regime, ind);
+    }
+    const stopDistPct = (stopLossPrice - currentPrice) / currentPrice;
+    if (stopDistPct < RISK.MIN_STOP_LOSS_PCT) {
+      return mkWait(`Stop distance too tight (${(stopDistPct * 100).toFixed(2)}% < ${(RISK.MIN_STOP_LOSS_PCT * 100).toFixed(2)}%). Capital protected from fee trap.`, currentPrice, regime, ind);
+    }
+    const targetDistPct = (currentPrice - takeProfitPrice) / currentPrice;
+    if (targetDistPct < RISK.MIN_TAKE_PROFIT_PCT) {
+      return mkWait(`Target distance too small (${(targetDistPct * 100).toFixed(2)}% < ${(RISK.MIN_TAKE_PROFIT_PCT * 100).toFixed(2)}%). Fees would eat profits.`, currentPrice, regime, ind);
     }
     // PARABOLIC SQUEEZE VETO
     if (change24h > 25.0) {
@@ -176,9 +192,10 @@ export function detectSignal(
     currentPrice >= (ema21 - atr5m * 0.8) &&
     (macdHist >= prevHist || macdHist > 0)
   ) {
-    const rawStopDist = Math.max(currentPrice - swingLow, atr5m * RISK.STOP_LOSS_ATR_MULT);
+    const rawStopDist = Math.max(currentPrice - swingLow, atr5m * RISK.STOP_LOSS_ATR_MULT, currentPrice * RISK.MIN_STOP_LOSS_PCT);
     const stopLossPrice = currentPrice - rawStopDist;
-    const takeProfitPrice = currentPrice + (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
+    const rawTargetDist = Math.max(atr5m * RISK.TAKE_PROFIT_ATR_MULT, currentPrice * RISK.MIN_TAKE_PROFIT_PCT, rawStopDist * RISK.MIN_PLANNED_RR);
+    const takeProfitPrice = currentPrice + rawTargetDist;
     const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
 
     const sig = buildLongSignal(
@@ -198,9 +215,10 @@ export function detectSignal(
     currentPrice <= (ema21 + atr5m * 0.8) &&
     (macdHist <= prevHist || macdHist < 0)
   ) {
-    const rawStopDist = Math.max(swingHigh - currentPrice, atr5m * RISK.STOP_LOSS_ATR_MULT);
+    const rawStopDist = Math.max(swingHigh - currentPrice, atr5m * RISK.STOP_LOSS_ATR_MULT, currentPrice * RISK.MIN_STOP_LOSS_PCT);
     const stopLossPrice = currentPrice + rawStopDist;
-    const takeProfitPrice = currentPrice - (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
+    const rawTargetDist = Math.max(atr5m * RISK.TAKE_PROFIT_ATR_MULT, currentPrice * RISK.MIN_TAKE_PROFIT_PCT, rawStopDist * RISK.MIN_PLANNED_RR);
+    const takeProfitPrice = currentPrice - rawTargetDist;
     const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
 
     const sig = buildShortSignal(
@@ -212,8 +230,8 @@ export function detectSignal(
     if (sig.action !== 'WAIT') return sig;
   }
 
-  // ─── SETUP 2: RANGE-BOUND MEAN REVERSION (When 15m is RANGING) ──────────────
-  if (regime === 'RANGING' || chop15m >= 50) {
+  // ─── SETUP 2: RANGE-BOUND MEAN REVERSION (Only when 15m is strictly RANGING) ──────────────
+  if (regime === 'RANGING' && chop15m >= 48) {
     // Range Support Buy: Price near swingLow, RSI oversold <= 38, momentum bottoming
     // If coin has negative daily momentum (< -1.5%), range support usually fails
     if (
@@ -222,8 +240,10 @@ export function detectSignal(
       currentPrice <= (ema21 - atr5m * 0.3) &&
       macdHist > prevHist
     ) {
-      const stopLossPrice = Math.min(swingLow - (atr5m * 0.4), currentPrice - (atr5m * RISK.STOP_LOSS_ATR_MULT));
-      const takeProfitPrice = currentPrice + (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
+      const rawStopDist = Math.max(currentPrice - (swingLow - atr5m * 0.4), atr5m * RISK.STOP_LOSS_ATR_MULT, currentPrice * RISK.MIN_STOP_LOSS_PCT);
+      const stopLossPrice = currentPrice - rawStopDist;
+      const rawTargetDist = Math.max(atr5m * RISK.TAKE_PROFIT_ATR_MULT, currentPrice * RISK.MIN_TAKE_PROFIT_PCT, rawStopDist * RISK.MIN_PLANNED_RR);
+      const takeProfitPrice = currentPrice + rawTargetDist;
       const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
 
       const sig = buildLongSignal(
@@ -243,8 +263,10 @@ export function detectSignal(
       currentPrice >= (ema21 + atr5m * 0.3) &&
       macdHist < prevHist
     ) {
-      const stopLossPrice = Math.max(swingHigh + (atr5m * 0.4), currentPrice + (atr5m * RISK.STOP_LOSS_ATR_MULT));
-      const takeProfitPrice = currentPrice - (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
+      const rawStopDist = Math.max((swingHigh + atr5m * 0.4) - currentPrice, atr5m * RISK.STOP_LOSS_ATR_MULT, currentPrice * RISK.MIN_STOP_LOSS_PCT);
+      const stopLossPrice = currentPrice + rawStopDist;
+      const rawTargetDist = Math.max(atr5m * RISK.TAKE_PROFIT_ATR_MULT, currentPrice * RISK.MIN_TAKE_PROFIT_PCT, rawStopDist * RISK.MIN_PLANNED_RR);
+      const takeProfitPrice = currentPrice - rawTargetDist;
       const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
 
       const sig = buildShortSignal(
@@ -260,6 +282,7 @@ export function detectSignal(
   // ─── SETUP 3: 5M MICROSTRUCTURE MOMENTUM EXPANSION ─────────────────────────
   // Bullish expansion: EMA9 > EMA21, price above VWAP, RSI 48-68, MACD positive expansion
   if (
+    regime !== 'TRENDING_BEAR' &&
     ema9 > ema21 &&
     currentPrice > vwap5m &&
     rsi5m >= 48 &&
@@ -268,8 +291,10 @@ export function detectSignal(
     macdHist >= prevHist &&
     volumeZ5m >= SIGNAL.VOLUME_ZSCORE_MIN
   ) {
-    const stopLossPrice = currentPrice - (atr5m * RISK.STOP_LOSS_ATR_MULT);
-    const takeProfitPrice = currentPrice + (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
+    const rawStopDist = Math.max(atr5m * RISK.STOP_LOSS_ATR_MULT, currentPrice * RISK.MIN_STOP_LOSS_PCT);
+    const stopLossPrice = currentPrice - rawStopDist;
+    const rawTargetDist = Math.max(atr5m * RISK.TAKE_PROFIT_ATR_MULT, currentPrice * RISK.MIN_TAKE_PROFIT_PCT, rawStopDist * RISK.MIN_PLANNED_RR);
+    const takeProfitPrice = currentPrice + rawTargetDist;
     const plannedRR = parseFloat(((takeProfitPrice - currentPrice) / Math.max(0.0001, currentPrice - stopLossPrice)).toFixed(2));
 
     const sig = buildLongSignal(
@@ -283,6 +308,7 @@ export function detectSignal(
 
   // Bearish expansion: EMA9 < EMA21, price below VWAP, RSI 32-52, MACD negative expansion
   if (
+    regime !== 'TRENDING_BULL' &&
     ema9 < ema21 &&
     currentPrice < vwap5m &&
     rsi5m <= 52 &&
@@ -291,8 +317,10 @@ export function detectSignal(
     macdHist <= prevHist &&
     volumeZ5m >= SIGNAL.VOLUME_ZSCORE_MIN
   ) {
-    const stopLossPrice = currentPrice + (atr5m * RISK.STOP_LOSS_ATR_MULT);
-    const takeProfitPrice = currentPrice - (atr5m * RISK.TAKE_PROFIT_ATR_MULT);
+    const rawStopDist = Math.max(atr5m * RISK.STOP_LOSS_ATR_MULT, currentPrice * RISK.MIN_STOP_LOSS_PCT);
+    const stopLossPrice = currentPrice + rawStopDist;
+    const rawTargetDist = Math.max(atr5m * RISK.TAKE_PROFIT_ATR_MULT, currentPrice * RISK.MIN_TAKE_PROFIT_PCT, rawStopDist * RISK.MIN_PLANNED_RR);
+    const takeProfitPrice = currentPrice - rawTargetDist;
     const plannedRR = parseFloat(((currentPrice - takeProfitPrice) / Math.max(0.0001, stopLossPrice - currentPrice)).toFixed(2));
 
     const sig = buildShortSignal(

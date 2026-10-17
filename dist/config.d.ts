@@ -1,5 +1,5 @@
 export declare const CONFIG: {
-    readonly VERSION: "3.4.0";
+    readonly VERSION: "3.5.0";
     readonly PORT: number;
     readonly SUPABASE_URL: string;
     readonly SUPABASE_SERVICE_ROLE_KEY: string;
@@ -25,10 +25,15 @@ export declare const RISK: {
     readonly RISK_FACTOR: 0.05;
     readonly MARGIN_PER_TRADE: 1;
     readonly MAX_CONCURRENT_POSITIONS: 4;
-    readonly STOP_LOSS_ATR_MULT: 1.6;
-    readonly TAKE_PROFIT_ATR_MULT: 2.8;
+    readonly STOP_LOSS_ATR_MULT: 1.8;
+    readonly TAKE_PROFIT_ATR_MULT: 3.2;
+    readonly MIN_STOP_LOSS_PCT: 0.008;
+    readonly MIN_TAKE_PROFIT_PCT: 0.016;
+    readonly MIN_PLANNED_RR: 1.5;
     readonly BREAKEVEN_ATR_TRIGGER: 1.8;
     readonly TRAILING_STOP_ATR_MULT: 1.6;
+    readonly MIN_HOLD_BEFORE_AI_REVIEW_SEC: 360;
+    readonly MIN_AI_EXIT_MOVE_PCT: 0.0035;
     readonly FEE_RATE_TAKER: 0.0006;
     readonly FEE_RATE_MAKER: 0.0002;
     readonly FEE_RATE: 0.0006;

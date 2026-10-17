@@ -13,6 +13,8 @@ const TRADFI_BLOCKLIST = new Set([
   'AAPL','TSLA','NVDA','MSFT','AMZN','GOOG','META','NFLX',
   'COIN','MSTR','MU','AMD','INTC','BABA','NIO',
   'SPY','QQQ','DIA','INDEX','NDX','SPX','DJI',
+  'SOXL','SOXS','TQQQ','SQQQ','UVXY','SVXY','FNGU','FNGD',
+  'LABU','LABD','NUGT','DUST','YINN','YANG','BOIL','KOLD',
   'XAU','XAG','WTI','OIL','GOLD','SILVER',
   'EUR','GBP','JPY','AUD','CAD','CHF','CNY',
 ]);
@@ -128,16 +130,16 @@ export async function fetchCurrentPrice(symbol: string): Promise<number> {
   return parseFloat(json.data?.[0]?.lastPr || json.data?.lastPr || '0');
 }
 
-/** Fetch last N candles via REST (bootstrap only — after this we stream) */
+/** Fetch last N candles via REST (uses live candles endpoint to include current forming candle) */
 export async function fetchBootstrapCandles(
   symbol: string,
-  limit = 60,
+  limit = 100,
   granularity: '1m' | '5m' | '15m' | '30m' | '1H' = '5m'
 ): Promise<any[]> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(
-        `${BITGET_REST}/mix/market/history-candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`,
+        `${BITGET_REST}/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`,
         { signal: AbortSignal.timeout(8000) }
       );
       if (res.status === 429) {

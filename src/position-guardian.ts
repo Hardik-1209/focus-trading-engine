@@ -170,17 +170,25 @@ export function getActivePositionsList(): ActivePosition[] {
 export function updatePositionStopLoss(symbol: string, newStopLoss: number): boolean {
   const pos = activePositions.get(symbol);
   if (!pos || pos.isClosing) return false;
+  const roundTripFeeBuffer = RISK.FEE_RATE * 2;
+
   // Only allow tightening (for LONG: higher SL; for SHORT: lower SL)
   if (pos.positionSide === 'LONG') {
     if (!pos.stopLossPrice || newStopLoss > pos.stopLossPrice) {
       pos.stopLossPrice = newStopLoss;
-      console.log(`[Guardian v3.4] 🛡️ Tightened Stop Loss for ${symbol} LONG -> $${newStopLoss.toFixed(4)}`);
+      if (newStopLoss >= pos.entryPrice * (1 + roundTripFeeBuffer)) {
+        pos.isBreakevenSet = true;
+      }
+      console.log(`[Guardian v3.5] 🛡️ Tightened Stop Loss for ${symbol} LONG -> $${newStopLoss.toFixed(4)}${pos.isBreakevenSet ? ' (Risk-Free Breakeven)' : ''}`);
       return true;
     }
   } else if (pos.positionSide === 'SHORT') {
     if (!pos.stopLossPrice || newStopLoss < pos.stopLossPrice) {
       pos.stopLossPrice = newStopLoss;
-      console.log(`[Guardian v3.4] 🛡️ Tightened Stop Loss for ${symbol} SHORT -> $${newStopLoss.toFixed(4)}`);
+      if (newStopLoss <= pos.entryPrice * (1 - roundTripFeeBuffer)) {
+        pos.isBreakevenSet = true;
+      }
+      console.log(`[Guardian v3.5] 🛡️ Tightened Stop Loss for ${symbol} SHORT -> $${newStopLoss.toFixed(4)}${pos.isBreakevenSet ? ' (Risk-Free Breakeven)' : ''}`);
       return true;
     }
   }

@@ -18,13 +18,14 @@ function fmtPrice(val: number): string {
  * Serializes raw Candle array into a structured tabular representation for LLM analysis.
  * Chronological order: oldest candle is row 1, newest candle is at bottom marked (CURRENT).
  */
-export function formatCandleSequence(candles: Candle[] = [], timeframe: string, maxCount = 16): string {
+export function formatCandleSequence(candles: Candle[] = [], timeframe: string, maxCount = 16, entryTimestamp?: number): string {
   if (!candles || candles.length === 0) return `[No ${timeframe} candle data available]`;
 
   const slice = candles.slice(-maxCount);
   const rows: string[] = [];
   rows.push(`Timeframe: ${timeframe} (Last ${slice.length} candles, chronological: oldest -> newest):`);
-  rows.push(`Index | Time (UTC) | Open | High | Low | Close | Volume | Change%`);
+  const statusHeader = entryTimestamp ? 'Status     | ' : '';
+  rows.push(`Index | Time (UTC) | ${statusHeader}Open | High | Low | Close | Volume | Change%`);
 
   for (let i = 0; i < slice.length; i++) {
     const c = slice[i];
@@ -34,8 +35,13 @@ export function formatCandleSequence(candles: Candle[] = [], timeframe: string, 
     const chgPct = c.open > 0 ? (((c.close - c.open) / c.open) * 100).toFixed(2) : '0.00';
     const sign = Number(chgPct) >= 0 ? '+' : '';
     const label = isLatest ? `${i + 1} (CURRENT)` : `${i + 1}`;
+    let statusCol = '';
+    if (entryTimestamp) {
+      const isPost = c.timestamp >= (entryTimestamp - 60000); // within 1m of entry is post
+      statusCol = (isPost ? 'POST-ENTRY' : 'PRE-ENTRY').padEnd(10) + ' | ';
+    }
     rows.push(
-      `${label.padEnd(11)} | ${timeStr} | ${fmtPrice(c.open)} | ${fmtPrice(c.high)} | ${fmtPrice(c.low)} | ${fmtPrice(c.close)} | ${Math.round(c.volume).toLocaleString()} | ${sign}${chgPct}%`
+      `${label.padEnd(11)} | ${timeStr} | ${statusCol}${fmtPrice(c.open)} | ${fmtPrice(c.high)} | ${fmtPrice(c.low)} | ${fmtPrice(c.close)} | ${Math.round(c.volume).toLocaleString()} | ${sign}${chgPct}%`
     );
   }
 
@@ -355,18 +361,15 @@ export async function evaluateOpenPositionWithGemini(
   const system =
     'You are the Lead Risk Guardian managing an ACTIVE OPEN POSITION at a high-performance crypto prop desk. ' +
     'Your personal capital is currently committed in the market ($1.00 margin @ 3x leverage).\n\n' +
-    'YOUR MISSION: ACTIVE CAPITAL DEFENSE.\n' +
-    'Once in a trade, you NEVER sit passively like an amateur and wait to lose your full stop loss if the market turns against you!\n' +
-    'Professional quants cut bad trades early (at -0.5% or -1.0%) the moment market structure breaks down.\n\n' +
-    'EXIT TRIGGERS (When to output "EXIT"):\n' +
-    '- For LONG: Consecutive bearish rejection wicks, lower highs & lower lows forming on 5m, loss of VWAP/support with expanding bearish volume, or momentum rolling over.\n' +
-    '- For SHORT: Consecutive bullish absorption wicks, higher highs forming on 5m, reclaim of VWAP/resistance with expanding bullish volume, or squeeze building against you.\n' +
-    '- If the original trade thesis is INVALIDATED by the latest candles, CUT THE LOSS IMMEDIATELY (action: "EXIT").\n\n' +
-    'TIGHTEN_STOP TRIGGERS (When to output "TIGHTEN_STOP"):\n' +
-    '- The trade is in profit or structure has moved in our favor, and you want to lock in gains or trail risk just behind the latest 5m structural swing high/low.\n' +
-    '- Provide the exact "newStopLoss" price.\n\n' +
-    'HOLD TRIGGERS (When to output "HOLD"):\n' +
-    '- Price action remains healthy, trend continuation is intact, and there is no evidence of structural breakdown.\n\n' +
+    'CRITICAL CONTEXT: The position was entered on a pullback or mean-reversion setup. ' +
+    'Pre-entry momentum against the trade was EXPECTED and was the trigger for entry. ' +
+    'DO NOT EXIT based on candles that formed before or around entry (marked PRE-ENTRY)!\n\n' +
+    'EXIT RULES:\n' +
+    '- You may ONLY output "EXIT" if at least 2 full POST-ENTRY candles decisively invalidate the setup on heavy volume breaking structural support/resistance.\n' +
+    '- NEVER exit if price is fluctuating within +/- 0.4% of entry, as fees will needlessly destroy capital.\n' +
+    '- Default to HOLD while the trade is developing.\n\n' +
+    'TIGHTEN_STOP RULES:\n' +
+    '- When price moves in profit, output "TIGHTEN_STOP" with a "newStopLoss" that sits just behind the latest 5m structural swing high/low to lock in gains.\n\n' +
     'Return ONLY valid JSON matching this schema:\n' +
     '{\n' +
     '  "action": "HOLD" | "EXIT" | "TIGHTEN_STOP",\n' +
@@ -387,11 +390,11 @@ export async function evaluateOpenPositionWithGemini(
     `Time in Trade: ${minutesHeld} minute(s)\n` +
     `Current Stop Loss: $${pos.stopLossPrice ? fmtPrice(pos.stopLossPrice) : 'None'} | Target: $${pos.takeProfitPrice ? fmtPrice(pos.takeProfitPrice) : 'None'}\n\n` +
     `=== RECENT 15-MINUTE CANDLES ===\n` +
-    `${formatCandleSequence(candles15m.slice(-6), 'Recent 15m Structure', 6)}\n\n` +
+    `${formatCandleSequence(candles15m.slice(-6), 'Recent 15m Structure', 6, pos.openedAt)}\n\n` +
     `=== RECENT 5-MINUTE CANDLES (LATEST PRICE ACTION) ===\n` +
-    `${formatCandleSequence(candles5m.slice(-8), 'Recent 5m Microstructure', 8)}\n\n` +
+    `${formatCandleSequence(candles5m.slice(-8), 'Recent 5m Microstructure', 8, pos.openedAt)}\n\n` +
     `=== GUARDIAN DECISION ===\n` +
-    `Inspect the latest candles since entry. Has the trade thesis broken down? Should we CUT LOSS NOW (EXIT), TIGHTEN_STOP, or HOLD?\n` +
+    `Inspect the POST-ENTRY candles since entry. Has the trade thesis decisively broken down with at least 2 full invalidating candles? Or should we HOLD / TIGHTEN_STOP?\n` +
     `Return JSON: {"action":"HOLD"|"EXIT"|"TIGHTEN_STOP","reason":"string","newStopLoss":number}`;
 
   try {

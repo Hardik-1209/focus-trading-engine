@@ -4,7 +4,7 @@ import type { RiskParams, RiskVerdict, NarrativeScore, AiPositionReview } from '
  * Serializes raw Candle array into a structured tabular representation for LLM analysis.
  * Chronological order: oldest candle is row 1, newest candle is at bottom marked (CURRENT).
  */
-export declare function formatCandleSequence(candles: Candle[] | undefined, timeframe: string, maxCount?: number): string;
+export declare function formatCandleSequence(candles: Candle[] | undefined, timeframe: string, maxCount?: number, entryTimestamp?: number): string;
 /** Get current active Gemini key with round-robin rotation & cooldown bypass */
 export declare function getNextGeminiKey(): {
     key: string;

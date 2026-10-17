@@ -1,6 +1,6 @@
 {
   "name": "focus-trading-engine",
-  "version": "3.0.0",
+  "version": "3.5.0",
   "description": "24/7 cloud-native focus trading engine with Groq LLM rotation and real-time dashboard",
   "main": "dist/main.js",
   "scripts": {

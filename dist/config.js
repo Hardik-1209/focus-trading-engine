@@ -16,7 +16,7 @@ function optional(key, fallback) {
     return process.env[key] || fallback;
 }
 exports.CONFIG = {
-    VERSION: '3.4.0',
+    VERSION: '3.5.0',
     PORT: parseInt(optional('PORT', '3000')),
     SUPABASE_URL: required('SUPABASE_URL'),
     SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY'),
@@ -53,11 +53,17 @@ exports.RISK = {
     RISK_FACTOR: 0.05, // 5% margin allocation per trade
     MARGIN_PER_TRADE: 1.00, // Flat $1.00 margin per trade ($3.00 notional at 3x)
     MAX_CONCURRENT_POSITIONS: 4, // Max concurrent open positions
-    // Dynamic ATR Geometry (Triple Barrier)
-    STOP_LOSS_ATR_MULT: 1.6, // Structural dynamic stop = 1.6 * ATR
-    TAKE_PROFIT_ATR_MULT: 2.8, // Target reward = 2.8 * ATR (Planned R:R >= 1.5:1)
+    // Dynamic ATR Geometry & Minimum Distances (prevents fee drag)
+    STOP_LOSS_ATR_MULT: 1.8, // Structural dynamic stop = 1.8 * ATR
+    TAKE_PROFIT_ATR_MULT: 3.2, // Target reward = 3.2 * ATR (Planned R:R >= 1.6:1)
+    MIN_STOP_LOSS_PCT: 0.008, // 0.8% minimum stop distance floor (prevents micro-scalp fee traps)
+    MIN_TAKE_PROFIT_PCT: 0.016, // 1.6% minimum reward distance floor (guarantees fees < 7.5% of win)
+    MIN_PLANNED_RR: 1.5, // 1.5:1 minimum reward:risk ratio strictly required
     BREAKEVEN_ATR_TRIGGER: 1.8, // Move stop to breakeven only at +1.8 * ATR profit (prevents premature choke)
     TRAILING_STOP_ATR_MULT: 1.6, // Trailing stop distance behind peak
+    // AI Position Guardian Safeguards
+    MIN_HOLD_BEFORE_AI_REVIEW_SEC: 360, // 6 minutes (ensure >= 1 full 5m candle forms post-entry)
+    MIN_AI_EXIT_MOVE_PCT: 0.0035, // 0.35% minimum price movement required before AI early exit
     // Fee Structure
     FEE_RATE_TAKER: 0.0006, // Bitget taker: 0.06%
     FEE_RATE_MAKER: 0.0002, // Bitget maker: 0.02%
@@ -87,6 +93,6 @@ exports.SIGNAL = {
     ADX_MIN: 18, // Minimum directional trend strength
     CHOP_MAX: 65, // Block severe choppy consolidation
     VOLUME_ZSCORE_MIN: 0.3, // Volume confirmation floor (z-score >= 0.3)
-    SIGNAL_COOLDOWN_MS: 3 * 60 * 1000, // 3-min cooldown between signals on the same symbol
+    SIGNAL_COOLDOWN_MS: 15 * 60 * 1000, // 15-min cooldown between signals on the same symbol (prevents same-candle churning)
 };
 //# sourceMappingURL=config.js.map
